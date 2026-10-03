@@ -91,6 +91,19 @@ class IpoController extends Controller
         $myMoneyBatches = $batches->where('funding_source', 'my_money');
         $userMoneyBatches = $batches->where('funding_source', 'user_money');
 
+        if (! $isAdmin) {
+            if ($ipo->activeRate) {
+                $ipo->activeRate->makeHidden(['trader_rate', 'margin']);
+            }
+            $ipo->rates->each(fn ($rate) => $rate->makeHidden(['trader_rate', 'margin']));
+            $batches->makeHidden([
+                'expected_net_earnings',
+                'settled_net_earnings',
+                'expected_gross_profit',
+                'settled_gross_profit',
+            ]);
+        }
+
         $financials = [
             'total_applications' => (int) $batches->sum('application_count'),
             'my_money' => [
@@ -98,8 +111,8 @@ class IpoController extends Controller
                 'capital_deployed' => (float) $myMoneyBatches->sum('capital_amount'),
                 'expected_gross_profit' => (float) $myMoneyBatches->sum('expected_gross_profit'),
                 'expected_user_payout' => (float) $myMoneyBatches->sum('expected_user_payout'),
-                'expected_net_earnings' => (float) $myMoneyBatches->sum('expected_net_earnings'),
-                'realized_net_earnings' => (float) $myMoneyBatches->sum('settled_net_earnings'),
+                'expected_net_earnings' => $isAdmin ? (float) $myMoneyBatches->sum('expected_net_earnings') : 0,
+                'realized_net_earnings' => $isAdmin ? (float) $myMoneyBatches->sum('settled_net_earnings') : 0,
                 'capital_returned' => (float) $myMoneyBatches->sum('capital_returned'),
             ],
             'user_money' => [
@@ -107,8 +120,8 @@ class IpoController extends Controller
                 'capital_recorded' => (float) $userMoneyBatches->sum('capital_amount'),
                 'expected_gross_profit' => (float) $userMoneyBatches->sum('expected_gross_profit'),
                 'expected_user_payout' => (float) $userMoneyBatches->sum('expected_user_payout'),
-                'expected_net_earnings' => (float) $userMoneyBatches->sum('expected_net_earnings'),
-                'realized_net_earnings' => (float) $userMoneyBatches->sum('settled_net_earnings'),
+                'expected_net_earnings' => $isAdmin ? (float) $userMoneyBatches->sum('expected_net_earnings') : 0,
+                'realized_net_earnings' => $isAdmin ? (float) $userMoneyBatches->sum('settled_net_earnings') : 0,
             ],
         ];
 

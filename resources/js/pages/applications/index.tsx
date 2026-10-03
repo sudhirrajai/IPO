@@ -348,7 +348,7 @@ export default function ApplicationsIndex({
                                                             {formatInr(appAmount)}
                                                         </span>
                                                         <span className="text-[11px] text-neutral-400 block uppercase">
-                                                            {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
+                                                            {batch.funding_source === 'my_money' ? (isAdmin ? 'Admin Capital' : 'Sponsored') : 'Self-Funded'}
                                                         </span>
                                                     </td>
                                                     <td className="py-3 px-4">
@@ -366,8 +366,15 @@ export default function ApplicationsIndex({
                                                             </Badge>
                                                         )}
                                                     </td>
-                                                    <td className="py-3 px-4 font-semibold text-emerald-600">
-                                                        {formatInr(isAllotted ? (batch.settled_user_payout ?? batch.expected_user_payout) : isNotAllotted ? 0 : batch.expected_user_payout)}
+                                                    <td className="py-3 px-4">
+                                                        <span className="font-semibold text-emerald-600 block">
+                                                            {formatInr(isAllotted ? (batch.settled_user_payout ?? batch.expected_user_payout) : isNotAllotted ? 0 : batch.expected_user_payout)}
+                                                        </span>
+                                                        {isPending && (
+                                                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-normal block">
+                                                                Finalized Listing + T+1
+                                                            </span>
+                                                        )}
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         <Badge

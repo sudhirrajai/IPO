@@ -140,7 +140,7 @@ export default function IpoShow({
     );
     const [batchUserId, setBatchUserId] = useState(isAdmin ? (usersList[0]?.id ? String(usersList[0].id) : '') : String(auth.user.id));
     const [batchCount, setBatchCount] = useState('1');
-    const [batchFunding, setBatchFunding] = useState<'my_money' | 'user_money'>('my_money');
+    const [batchFunding, setBatchFunding] = useState<'my_money' | 'user_money'>(isAdmin ? 'my_money' : 'user_money');
     const [batchPanId, setBatchPanId] = useState('');
     const [batchNotes, setBatchNotes] = useState('');
     const [batchTraderRef, setBatchTraderRef] = useState('');
@@ -249,7 +249,7 @@ export default function IpoShow({
             profit_sharing_type: profitSharingType,
             profit_sharing_value: profitSharingValue ? Number(profitSharingValue) : 0,
             application_count: batchCount,
-            funding_source: batchFunding,
+            funding_source: isAdmin ? batchFunding : 'user_money',
             pan_id: batchPanId || null,
             notes: batchNotes,
             trader_reference: batchTraderRef,
@@ -419,11 +419,16 @@ export default function IpoShow({
                         )}
 
                         <Button
-                            onClick={() => setIsBatchModalOpen(true)}
+                            onClick={() => {
+                                setApplicantName(auth.user.name || '');
+                                setBatchUserId(isAdmin ? (usersList[0]?.id ? String(usersList[0].id) : '') : String(auth.user.id));
+                                setBatchFunding(isAdmin ? 'my_money' : 'user_money');
+                                setIsBatchModalOpen(true);
+                            }}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
                         >
                             <Plus className="mr-2 h-4 w-4" />
-                            Record Application
+                            {isAdmin ? 'Record Application' : 'Apply for IPO'}
                         </Button>
                     </div>
                 </div>
@@ -651,17 +656,17 @@ export default function IpoShow({
                                     </span>
                                 </div>
 
-                                {/* Step 4: Listing */}
+                                {/* Step 4: Listing & Settlement */}
                                 <div className="p-2.5 rounded-lg border border-neutral-100 dark:border-neutral-800/80 bg-neutral-50/70 dark:bg-neutral-900/50">
                                     <div className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 mb-1">
                                         <TrendingUp className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
-                                        <span className="text-[11px] font-semibold uppercase">4. Listing Day</span>
+                                        <span className="text-[11px] font-semibold uppercase">4. Listing & Settlement</span>
                                     </div>
                                     <p className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
                                         {formatDateShort(ipo.listing_date)}
                                     </p>
                                     <span className="text-[10px] text-neutral-500 mt-0.5 block">
-                                        {ipo.listing_exchange || ipo.exchange || 'NSE / BSE'} 10:00 AM
+                                        Finalized on Listing + T+1
                                     </span>
                                 </div>
                             </div>
@@ -1078,11 +1083,19 @@ export default function IpoShow({
                                                         </td>
                                                         <td className="py-3 px-3">
                                                             <span className="font-medium text-emerald-600 dark:text-emerald-400 block">
-                                                                Payout: {formatInr(isAllotted ? (batch.settled_user_payout ?? batch.expected_user_payout) : isNotAllotted ? 0 : batch.expected_user_payout)}
+                                                                {isAdmin ? 'Payout: ' : 'Your Payout: '}
+                                                                {formatInr(isAllotted ? (batch.settled_user_payout ?? batch.expected_user_payout) : isNotAllotted ? 0 : batch.expected_user_payout)}
                                                             </span>
-                                                            <span className="text-[11px] text-neutral-400 block">
-                                                                Net: {formatInr(isAllotted ? (batch.settled_net_earnings ?? batch.expected_net_earnings) : isNotAllotted ? 0 : batch.expected_net_earnings)}
-                                                            </span>
+                                                            {isAdmin && (
+                                                                <span className="text-[11px] text-neutral-400 block">
+                                                                    Admin Net: {formatInr(isAllotted ? (batch.settled_net_earnings ?? batch.expected_net_earnings) : isNotAllotted ? 0 : batch.expected_net_earnings)}
+                                                                </span>
+                                                            )}
+                                                            {!isAdmin && isPending && (
+                                                                <span className="text-[10px] text-amber-600 dark:text-amber-400 block">
+                                                                    Finalized Listing + T+1
+                                                                </span>
+                                                            )}
                                                         </td>
                                                         <td className="py-3 px-3">
                                                             <Badge
@@ -1534,9 +1547,11 @@ export default function IpoShow({
             <Dialog open={isBatchModalOpen} onOpenChange={setIsBatchModalOpen}>
                 <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Fill IPO Application</DialogTitle>
+                        <DialogTitle>{isAdmin ? 'Record IPO Application' : `Apply for ${ipo.company_name}`}</DialogTitle>
                         <DialogDescription>
-                            Record an application for {ipo.company_name} with flexible profit sharing and bank account details.
+                            {isAdmin
+                                ? `Record an application for ${ipo.company_name} with flexible profit sharing and bank account details.`
+                                : `Submit your application for ${ipo.company_name}. Payouts are finalized on Listing Day + T+1.`}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -1824,21 +1839,32 @@ export default function IpoShow({
                                 </span>
                             </div>
 
-                            <div className="space-y-1">
-                                <Label htmlFor="funding_source">Funding Capital Source *</Label>
-                                <Select
-                                    value={batchFunding}
-                                    onValueChange={(val: 'my_money' | 'user_money') => setBatchFunding(val)}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="my_money">My Money (I fund the capital)</SelectItem>
-                                        <SelectItem value="user_money">User Money (Applicant funds)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                            {isAdmin ? (
+                                <div className="space-y-1">
+                                    <Label htmlFor="funding_source">Funding Capital Source *</Label>
+                                    <Select
+                                        value={batchFunding}
+                                        onValueChange={(val: 'my_money' | 'user_money') => setBatchFunding(val)}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="my_money">My Money (Admin Funds Capital)</SelectItem>
+                                            <SelectItem value="user_money">User Money (Applicant Funds)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            ) : (
+                                <div className="space-y-1">
+                                    <Label>Funding Capital Source</Label>
+                                    <div className="h-9 px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-100/60 dark:bg-neutral-800/60 text-xs font-medium text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                                        <span>Self-Funded (via UPI Mandate)</span>
+                                        <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-300 bg-emerald-50/50 dark:bg-emerald-950/30">Direct</Badge>
+                                    </div>
+                                    <span className="text-[10px] text-neutral-400">Blocked directly in your own bank account via UPI mandate</span>
+                                </div>
+                            )}
                         </div>
 
                         {/* Profit Sharing Model */}
@@ -1879,7 +1905,7 @@ export default function IpoShow({
                                             : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 hover:bg-neutral-50 dark:hover:bg-neutral-900 disabled:opacity-40'
                                     }`}
                                 >
-                                    Fixed Rate Margin
+                                    {isAdmin ? 'Fixed Rate Margin' : `Published Rate (₹${activePublishedRate})`}
                                 </button>
                             </div>
 
@@ -1922,44 +1948,72 @@ export default function IpoShow({
                         </div>
 
                         {/* Auto-Calculated Metrics Card (From API & IPO) */}
-                        <div className="rounded-xl bg-neutral-50 dark:bg-neutral-900/60 p-3.5 border border-neutral-200/80 dark:border-neutral-800 space-y-2">
-                            <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 block">
-                                Live Auto-Calculations (From API)
-                            </span>
+                        <div className="rounded-xl bg-neutral-50 dark:bg-neutral-900/60 p-3.5 border border-neutral-200/80 dark:border-neutral-800 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 block">
+                                    Live Auto-Calculations (From API)
+                                </span>
+                                <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/60 dark:border-amber-800 flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    Finalized Listing Day + T+1
+                                </span>
+                            </div>
 
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
-                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2 border border-neutral-100 dark:border-neutral-700/60">
+                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2.5 border border-neutral-100 dark:border-neutral-700/60">
                                     <span className="text-[11px] text-neutral-400 block">Amount of IPO (Capital)</span>
                                     <span className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
                                         {formatInr(calculatedIpoAmount)}
                                     </span>
                                 </div>
 
-                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2 border border-neutral-100 dark:border-neutral-700/60">
+                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2.5 border border-neutral-100 dark:border-neutral-700/60">
                                     <span className="text-[11px] text-neutral-400 block">Current GMP</span>
                                     <span className="text-sm font-bold text-emerald-600">
                                         ₹{currentGmp} / sh
                                     </span>
                                 </div>
 
-                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2 border border-neutral-100 dark:border-neutral-700/60">
+                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2.5 border border-neutral-100 dark:border-neutral-700/60">
                                     <span className="text-[11px] text-neutral-400 block">Est. Listing Gain</span>
                                     <span className="text-sm font-bold text-blue-600 dark:text-blue-400">
                                         {formatInr(calculatedListingGain)}
                                     </span>
                                 </div>
 
-                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2 border border-neutral-100 dark:border-neutral-700/60">
-                                    <span className="text-[11px] text-neutral-400 block">Applicant Payout</span>
-                                    <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                                <div className={`rounded-lg bg-white dark:bg-neutral-800 p-2.5 border border-neutral-100 dark:border-neutral-700/60 ${isAdmin ? '' : 'col-span-2 sm:col-span-3 bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800'}`}>
+                                    <span className="text-[11px] text-neutral-400 block">
+                                        {isAdmin ? 'Applicant Payout' : 'Your Expected Profit / Payout'}
+                                    </span>
+                                    <span className="text-base sm:text-lg font-bold text-emerald-600 dark:text-emerald-400">
                                         {formatInr(previewUserPayout)}
                                     </span>
+                                    {!isAdmin && (
+                                        <span className="text-[10px] text-neutral-500 block mt-0.5">
+                                            100% your earnings upon successful allotment
+                                        </span>
+                                    )}
                                 </div>
 
-                                <div className="rounded-lg bg-white dark:bg-neutral-800 p-2 border border-neutral-100 dark:border-neutral-700/60 col-span-2 sm:col-span-2">
-                                    <span className="text-[11px] text-neutral-400 block">Your Estimated Net Profit</span>
-                                    <span className="text-sm font-bold text-emerald-600">
-                                        {formatInr(previewNetEarnings)}
+                                {isAdmin && (
+                                    <div className="rounded-lg bg-white dark:bg-neutral-800 p-2.5 border border-neutral-100 dark:border-neutral-700/60 col-span-2 sm:col-span-2">
+                                        <span className="text-[11px] text-neutral-400 block">Admin Net Margin / Profit</span>
+                                        <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                                            {formatInr(previewNetEarnings)}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Settlement & Timeline Notice */}
+                            <div className="p-2.5 rounded-lg bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                                <Clock className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                                <div className="space-y-0.5">
+                                    <span className="font-semibold block text-amber-950 dark:text-amber-100">
+                                        Profit Finalization & Settlement Timeline
+                                    </span>
+                                    <span className="text-[10.5px] leading-relaxed text-amber-800 dark:text-amber-300 block">
+                                        All profit numbers shown above are estimated based on current GMP / agreed rate. Final calculations and payouts are settled strictly on <strong>Listing Day + T+1 day</strong> once exchange trading concludes and settlement completes.
                                     </span>
                                 </div>
                             </div>

@@ -158,22 +158,33 @@ class DashboardController extends Controller
             ->orderByDesc('id')
             ->limit(10)
             ->get();
+        $recentBatches->makeHidden([
+            'expected_net_earnings',
+            'settled_net_earnings',
+            'expected_gross_profit',
+            'settled_gross_profit',
+            'trader_rate_snapshot',
+            'margin_snapshot',
+        ]);
 
         $openIpos = Ipo::with('activeRate')
             ->open()
             ->orderBy('close_date')
             ->get();
+        $openIpos->each(fn ($i) => $i->activeRate?->makeHidden(['trader_rate', 'margin']));
 
         $upcomingIpos = Ipo::with('activeRate')
             ->upcoming()
             ->orderBy('open_date')
             ->get();
+        $upcomingIpos->each(fn ($i) => $i->activeRate?->makeHidden(['trader_rate', 'margin']));
 
         $closedIpos = Ipo::with('activeRate')
             ->closed()
             ->orderByDesc('close_date')
             ->limit(10)
             ->get();
+        $closedIpos->each(fn ($i) => $i->activeRate?->makeHidden(['trader_rate', 'margin']));
 
         return Inertia::render('user-dashboard', [
             'metrics' => [

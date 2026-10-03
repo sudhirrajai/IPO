@@ -46,6 +46,17 @@ class ApplicationBatchController extends Controller
 
         $batches = $query->orderByDesc('id')->paginate(15)->withQueryString();
 
+        if (! $isAdmin) {
+            $batches->getCollection()->makeHidden([
+                'expected_net_earnings',
+                'settled_net_earnings',
+                'expected_gross_profit',
+                'settled_gross_profit',
+                'trader_rate_snapshot',
+                'margin_snapshot',
+            ]);
+        }
+
         $ipos = Ipo::select(['id', 'company_name', 'symbol', 'status'])->orderBy('company_name')->get();
         $users = $isAdmin ? User::select(['id', 'name', 'email'])->orderBy('name')->get() : [];
 
@@ -95,7 +106,9 @@ class ApplicationBatchController extends Controller
         }
 
         $validated['application_count'] = (int) ($validated['application_count'] ?? 1);
-        $validated['funding_source'] = $validated['funding_source'] ?? 'my_money';
+        $validated['funding_source'] = $isAdmin
+            ? ($validated['funding_source'] ?? 'my_money')
+            : 'user_money';
 
         try {
             $batch = ApplicationBatchService::createBatch($validated, $isAdmin);
