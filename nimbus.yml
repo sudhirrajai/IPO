@@ -11,8 +11,6 @@ install:
   - composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
   # 3. Install Node.js dependencies
   - npm install --prefer-offline --no-audit
-  # 4. Set directory permissions
-  - chmod -R 775 storage bootstrap/cache
 
 build:
   # 1. Generate app encryption key if not already set
