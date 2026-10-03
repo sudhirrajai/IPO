@@ -1,0 +1,50 @@
+version: 1
+
+runtime:
+  php: "8.3"
+  node: "20.0"
+
+install:
+  # 1. Copy example env if .env does not exist
+  - cp -n .env.example .env || true
+  # 2. Install PHP dependencies with composer (production optimized)
+  - composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
+  # 3. Install Node.js dependencies
+  - npm install --prefer-offline --no-audit
+  # 4. Set directory permissions
+  - chmod -R 775 storage bootstrap/cache
+
+build:
+  # 1. Generate app encryption key if not already set
+  - php artisan key:generate --force --no-interaction
+  # 2. Create public storage symlink
+  - php artisan storage:link
+  # 3. Compile frontend assets (Vite / React / Tailwind)
+  - npm run build
+  # 4. Run database migrations
+  - php artisan migrate --force
+  # 5. Cache configuration, routes, and views for production performance
+  - php artisan optimize:clear
+  - php artisan config:cache
+  - php artisan route:cache
+  - php artisan view:cache
+
+env:
+  APP_NAME: "IPO App"
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  APP_URL: "https://ipo.sudhirrajai.com"
+  LOG_CHANNEL: "daily"
+  LOG_LEVEL: "error"
+  DB_CONNECTION: "mysql"
+  DB_HOST: "127.0.0.1"
+  DB_PORT: "3306"
+  DB_DATABASE: "ipo"
+  DB_USERNAME: "ipo_user"
+  # Interactive Credentials Seeker:
+  # Marking with "prompt()" tells Nimbus to seek this credential interactively at runtime.
+  DB_PASSWORD: "prompt()"
+  SESSION_DRIVER: "database"
+  SESSION_LIFETIME: "120"
+  QUEUE_CONNECTION: "database"
+  CACHE_STORE: "database"
