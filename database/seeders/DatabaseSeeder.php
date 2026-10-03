@@ -16,10 +16,10 @@ class DatabaseSeeder extends Seeder
     {
         // 1. Create Admin User
         User::firstOrCreate(
-            ['email' => 'admin@ipoapp.local'],
+            ['email' => 'sudhir@vmcore.in'],
             [
                 'name' => 'Admin Owner',
-                'password' => Hash::make('password'),
+                'password' => Hash::make('Sudhir@1234'),
                 'role' => 'admin',
                 'status' => 'active',
                 'phone' => '+91 9876543210',
