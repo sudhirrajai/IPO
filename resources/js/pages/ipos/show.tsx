@@ -9,6 +9,7 @@ import {
     Check,
     CheckCheck,
     CheckCircle2,
+    ChevronDown,
     Clock,
     Copy,
     CreditCard,
@@ -135,6 +136,9 @@ export default function IpoShow({
     const [applicantName, setApplicantName] = useState(auth.user.name || '');
     const [bankName, setBankName] = useState(bankAccounts[0]?.bank_name || '');
     const [panNumber, setPanNumber] = useState('');
+    const [isAddingNewPan, setIsAddingNewPan] = useState(userPans.length === 0);
+    const [panSearchQuery, setPanSearchQuery] = useState('');
+    const [isPanDropdownOpen, setIsPanDropdownOpen] = useState(false);
     const [upiId, setUpiId] = useState('');
     const [upiApp, setUpiApp] = useState('Auto');
     const [isAddingNewUpi, setIsAddingNewUpi] = useState(false);
@@ -153,6 +157,36 @@ export default function IpoShow({
     const [batchPanId, setBatchPanId] = useState('');
     const [batchNotes, setBatchNotes] = useState('');
     const [batchTraderRef, setBatchTraderRef] = useState('');
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isIpoAllotmentToday = Boolean(ipo.allotment_date && ipo.allotment_date.split('T')[0] === todayStr);
+
+    // Filter userPans by search query
+    const filteredPans = userPans.filter((p) => {
+        const q = panSearchQuery.toLowerCase().trim();
+        if (!q) return true;
+        return (
+            p.pan_number?.toLowerCase().includes(q) ||
+            p.masked_pan?.toLowerCase().includes(q) ||
+            p.account_holder_name?.toLowerCase().includes(q) ||
+            p.broker_name?.toLowerCase().includes(q) ||
+            p.notes?.toLowerCase().includes(q) ||
+            p.user?.name?.toLowerCase().includes(q)
+        );
+    });
+
+    const handleSelectSavedPan = (selectedPan: UserPan) => {
+        setPanNumber(selectedPan.pan_number);
+        setBatchPanId(String(selectedPan.id));
+        if (selectedPan.account_holder_name) {
+            setApplicantName(selectedPan.account_holder_name);
+        }
+        if (isAdmin && selectedPan.user_id) {
+            setBatchUserId(String(selectedPan.user_id));
+        }
+        setIsPanDropdownOpen(false);
+        setPanSearchQuery('');
+    };
 
     // Settlement modal state
     const [settleActualGross, setSettleActualGross] = useState('');
@@ -590,6 +624,41 @@ export default function IpoShow({
                         </Button>
                     </div>
                 </div>
+
+                {/* Allotment Day Alert Banner */}
+                {isIpoAllotmentToday && (
+                    <div className="rounded-xl border border-amber-300 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 p-4 shadow-sm dark:border-amber-900/50 dark:from-amber-950/40 dark:via-orange-950/20 dark:to-amber-950/40">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white shadow">
+                                    <Sparkles className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                                        Today is Allotment Day for {ipo.company_name}!
+                                        <Badge className="bg-amber-600 text-white font-bold text-[10px]">
+                                            {batches.length} Applications
+                                        </Badge>
+                                    </h3>
+                                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                                        Registrar allotment status is scheduled for today. Run KFintech scraper to verify allotment across all applications.
+                                    </p>
+                                </div>
+                            </div>
+                            {isAdmin && (
+                                <Button
+                                    size="sm"
+                                    onClick={handleCheckAllAllotments}
+                                    disabled={isCheckingAllAllotments}
+                                    className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-sm shrink-0"
+                                >
+                                    <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isCheckingAllAllotments ? 'animate-spin' : ''}`} />
+                                    {isCheckingAllAllotments ? 'Checking Status...' : 'Check All Allotments'}
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 {/* Tabs Navigation */}
                 <div className="flex border-b border-neutral-200 dark:border-neutral-800 space-x-6 text-sm font-medium">
@@ -1176,14 +1245,28 @@ export default function IpoShow({
                                                 const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
                                                 return (
-                                                    <tr key={batch.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
+                                                    <tr
+                                                        key={batch.id}
+                                                        className={`transition-colors ${
+                                                            isIpoAllotmentToday
+                                                                ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70 border-l-4 border-l-amber-500'
+                                                                : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
+                                                        }`}
+                                                    >
                                                         <td className="py-3 px-3">
                                                             <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
                                                                 {batch.applicant_name || batch.user?.name || 'Applicant'}
                                                             </span>
-                                                            <span className="font-mono text-[11px] text-neutral-400">
-                                                                {batch.batch_number} · {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
-                                                            </span>
+                                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                                <span className="font-mono text-[11px] text-neutral-400">
+                                                                    {batch.batch_number} · {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
+                                                                </span>
+                                                                {isIpoAllotmentToday && (
+                                                                    <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-4">
+                                                                        <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Allotment Today
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
                                                         </td>
                                                         <td className="py-3 px-3">
                                                             {batch.bank_name ? (
@@ -1345,12 +1428,16 @@ export default function IpoShow({
                                                                 {panNumberRaw && batch.application_status !== 'cancelled' && (
                                                                     <Button
                                                                         size="sm"
-                                                                        variant="outline"
+                                                                        variant={isIpoAllotmentToday ? 'default' : 'outline'}
                                                                         onClick={() => handleCheckAllotment(batch)}
-                                                                        className="h-7 px-2 text-xs border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50 font-medium"
-                                                                        title="Live scrape allotment status from KFintech portal"
+                                                                        className={`h-7 px-2.5 text-xs font-semibold ${
+                                                                            isIpoAllotmentToday
+                                                                                ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
+                                                                                : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
+                                                                        }`}
+                                                                        title={isIpoAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : 'Live scrape allotment status from KFintech portal'}
                                                                     >
-                                                                        <Search className="h-3 w-3 mr-1 text-sky-600" /> Check Allotment
+                                                                        <Search className={`h-3 w-3 mr-1 ${isIpoAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
                                                                     </Button>
                                                                 )}
 
@@ -1943,31 +2030,159 @@ export default function IpoShow({
                         {/* PAN & UPI */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1">
-                                <Label htmlFor="pan_number">PAN Number</Label>
-                                <Input
-                                    id="pan_number"
-                                    placeholder="e.g. ABCDE1234F"
-                                    maxLength={10}
-                                    value={panNumber}
-                                    onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
-                                    className="font-mono uppercase"
-                                />
-                                {userPans.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                        <span className="text-[10px] text-neutral-400">Quick PAN:</span>
-                                        {userPans.slice(0, 3).map((p) => (
+                                <div className="flex items-center justify-between">
+                                    <Label htmlFor="pan_number">PAN Number</Label>
+                                    <div className="flex items-center gap-2">
+                                        {userPans.length > 0 && (
                                             <button
-                                                key={p.id}
                                                 type="button"
                                                 onClick={() => {
-                                                    setBatchPanId(String(p.id));
-                                                    if (p.pan_number) setPanNumber(p.pan_number);
+                                                    setIsAddingNewPan(!isAddingNewPan);
+                                                    setIsPanDropdownOpen(false);
+                                                    if (!isAddingNewPan) {
+                                                        setPanNumber('');
+                                                        setBatchPanId('');
+                                                    }
                                                 }}
-                                                className="text-[10px] font-mono bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 px-1.5 py-0.5 rounded text-neutral-700 dark:text-neutral-300"
+                                                className="text-[11px] text-blue-600 hover:underline dark:text-blue-400 font-medium"
                                             >
-                                                {p.masked_pan}
+                                                {isAddingNewPan ? 'Select Saved PAN' : '+ Type New PAN'}
                                             </button>
-                                        ))}
+                                        )}
+                                    </div>
+                                </div>
+
+                                {!isAddingNewPan && userPans.length > 0 ? (
+                                    <div className="relative">
+                                        {/* Searchable Combobox Trigger */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsPanDropdownOpen(!isPanDropdownOpen)}
+                                            className="w-full flex items-center justify-between h-9 px-3 py-1.5 text-xs rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xs hover:border-neutral-300 dark:hover:border-neutral-700 transition"
+                                        >
+                                            {panNumber ? (
+                                                <div className="flex items-center gap-1.5 truncate text-left">
+                                                    <span className="font-mono font-bold text-neutral-900 dark:text-neutral-100">
+                                                        {isAdmin ? panNumber : `XXXXXX${panNumber.slice(-4)}`}
+                                                    </span>
+                                                    {(() => {
+                                                        const matched = userPans.find((p) => p.pan_number === panNumber);
+                                                        return matched?.account_holder_name ? (
+                                                            <span className="text-neutral-500 truncate text-[11px]">
+                                                                • {matched.account_holder_name}
+                                                            </span>
+                                                        ) : null;
+                                                    })()}
+                                                </div>
+                                            ) : (
+                                                <span className="text-neutral-400">Select or search saved PAN...</span>
+                                            )}
+                                            <ChevronDown className={`h-3.5 w-3.5 text-neutral-400 shrink-0 ml-1 transition-transform ${isPanDropdownOpen ? 'rotate-180' : ''}`} />
+                                        </button>
+
+                                        {/* Popover Dropdown Menu */}
+                                        {isPanDropdownOpen && (
+                                            <div className="absolute z-50 mt-1 w-full rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl p-2 space-y-1.5">
+                                                {/* Search Input */}
+                                                <div className="relative">
+                                                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
+                                                    <Input
+                                                        placeholder="Search PAN, name, broker..."
+                                                        value={panSearchQuery}
+                                                        onChange={(e) => setPanSearchQuery(e.target.value)}
+                                                        className="h-8 pl-8 text-xs font-normal"
+                                                        autoFocus
+                                                    />
+                                                </div>
+
+                                                {/* Filtered PAN list */}
+                                                <div className="max-h-48 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800">
+                                                    {filteredPans.length === 0 ? (
+                                                        <div className="py-3 px-2 text-center text-xs text-neutral-400">
+                                                            No saved PANs match "{panSearchQuery}".
+                                                            {panSearchQuery.trim().length === 10 && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setPanNumber(panSearchQuery.trim().toUpperCase());
+                                                                        setBatchPanId('');
+                                                                        setIsPanDropdownOpen(false);
+                                                                    }}
+                                                                    className="block mx-auto mt-1.5 text-xs text-blue-600 hover:underline font-semibold"
+                                                                >
+                                                                    Use "{panSearchQuery.trim().toUpperCase()}"
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        filteredPans.map((p) => (
+                                                            <button
+                                                                key={p.id}
+                                                                type="button"
+                                                                onClick={() => handleSelectSavedPan(p)}
+                                                                className={`w-full text-left py-2 px-2.5 rounded-md text-xs flex items-center justify-between transition ${
+                                                                    panNumber === p.pan_number
+                                                                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 font-semibold'
+                                                                        : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200'
+                                                                }`}
+                                                            >
+                                                                <div>
+                                                                    <div className="flex items-center gap-1.5 font-mono">
+                                                                        <span className="font-bold">{isAdmin ? p.pan_number : p.masked_pan}</span>
+                                                                        {p.broker_name && (
+                                                                            <span className="text-[10px] text-neutral-400 font-sans">
+                                                                                ({p.broker_name})
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    {p.account_holder_name && (
+                                                                        <span className="text-[11px] text-neutral-500 block truncate max-w-[200px]">
+                                                                            {p.account_holder_name}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                {isAdmin && p.user?.name && (
+                                                                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-neutral-300">
+                                                                        {p.user.name}
+                                                                    </Badge>
+                                                                )}
+                                                            </button>
+                                                        ))
+                                                    )}
+                                                </div>
+
+                                                {/* Bottom action to switch to typing */}
+                                                <div className="pt-1.5 border-t border-neutral-100 dark:border-neutral-800 flex justify-between items-center text-[11px]">
+                                                    <span className="text-neutral-400">Total: {userPans.length} saved</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setIsAddingNewPan(true);
+                                                            setIsPanDropdownOpen(false);
+                                                            setPanNumber('');
+                                                            setBatchPanId('');
+                                                        }}
+                                                        className="text-blue-600 hover:underline dark:text-blue-400 font-medium"
+                                                    >
+                                                        + Type New PAN
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="space-y-1">
+                                        <Input
+                                            id="pan_number"
+                                            placeholder="e.g. ABCDE1234F"
+                                            maxLength={10}
+                                            value={panNumber}
+                                            onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
+                                            className="font-mono uppercase text-sm"
+                                        />
+                                        <p className="text-[10px] text-neutral-400">
+                                            New PAN will be auto-saved and linked to this application.
+                                        </p>
                                     </div>
                                 )}
                             </div>

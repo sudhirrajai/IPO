@@ -130,8 +130,16 @@ class IpoController extends Controller
             ? User::where('status', 'active')->select(['id', 'name', 'email'])->with('pans')->get()
             : [];
 
-        // Current user saved PANs for application form
-        $userPans = $user->pans()->where('status', 'active')->get();
+        // Saved PANs for application form (all active PANs for admin, user's own PANs for regular user)
+        $userPans = $isAdmin
+            ? \App\Models\UserPan::with('user:id,name')
+                ->where('status', 'active')
+                ->orderBy('account_holder_name')
+                ->get()
+            : $user->pans()
+                ->where('status', 'active')
+                ->orderBy('account_holder_name')
+                ->get();
 
         // Saved Bank Accounts for quick selection with linked UPI IDs
         $bankAccounts = \App\Models\BankAccount::with('upis')

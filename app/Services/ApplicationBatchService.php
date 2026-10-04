@@ -156,7 +156,7 @@ class ApplicationBatchService
                 'user_id' => $userId,
                 'pan_number' => $panNum,
             ], [
-                'holder_name' => $data['applicant_name'] ?? 'Applicant',
+                'account_holder_name' => $data['applicant_name'] ?? 'Applicant',
                 'status' => 'active',
             ]);
             if (! in_array($pan->id, $panIds)) {

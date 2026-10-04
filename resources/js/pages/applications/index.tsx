@@ -1,14 +1,12 @@
-import { Head, Link, router, usePage } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import {
     Ban,
     Check,
     CheckCheck,
     CheckCircle2,
-    Clock,
+    ChevronDown,
     Copy,
-    CreditCard,
-    DollarSign,
-    Eye,
+    Edit3,
     FileSpreadsheet,
     FileText,
     Filter,
@@ -45,7 +43,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import AppLayout from '@/layouts/app-layout';
-import type { ApplicationBatch, BreadcrumbItem, Ipo, User } from '@/types';
+import type { ApplicationBatch, BreadcrumbItem, Ipo, User, UserPan } from '@/types';
 
 interface ApplicationsIndexProps {
     batches: {
@@ -56,12 +54,16 @@ interface ApplicationsIndexProps {
     };
     ipos: Ipo[];
     users: User[];
+    userPans?: UserPan[];
+    allotmentTodayCount?: number;
     filters: {
         ipo_id?: string;
         user_id?: string;
         funding_source?: string;
         application_status?: string;
         settlement_status?: string;
+        search?: string;
+        allotment_today?: string;
     };
     isAdmin: boolean;
 }
@@ -77,6 +79,8 @@ export default function ApplicationsIndex({
     batches,
     ipos,
     users,
+    userPans = [],
+    allotmentTodayCount = 0,
     filters,
     isAdmin,
 }: ApplicationsIndexProps) {
@@ -85,6 +89,8 @@ export default function ApplicationsIndex({
     const [selectedFunding, setSelectedFunding] = useState(filters.funding_source || 'all');
     const [selectedStatus, setSelectedStatus] = useState(filters.application_status || 'all');
     const [selectedSettlement, setSelectedSettlement] = useState(filters.settlement_status || 'all');
+    const [searchInput, setSearchInput] = useState(filters.search || '');
+    const isAllotmentTodayFilter = filters.allotment_today === '1';
 
     // Cancel modal
     const [cancellingBatch, setCancellingBatch] = useState<ApplicationBatch | null>(null);
@@ -100,13 +106,60 @@ export default function ApplicationsIndex({
     const [allotmentResult, setAllotmentResult] = useState<AllotmentResultData | null>(null);
     const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
 
+    // PAN attach / update modal
+    const [panModalBatch, setPanModalBatch] = useState<ApplicationBatch | null>(null);
+    const [panModalPanId, setPanModalPanId] = useState<string>('');
+    const [panModalPanNumber, setPanModalPanNumber] = useState<string>('');
+    const [panModalApplicantName, setPanModalApplicantName] = useState<string>('');
+    const [panModalIsNewPan, setPanModalIsNewPan] = useState(false);
+    const [panModalSearchQuery, setPanModalSearchQuery] = useState('');
+    const [panModalDropdownOpen, setPanModalDropdownOpen] = useState(false);
+    const [isSavingPan, setIsSavingPan] = useState(false);
+
     // PAN copy indicator
     const [copiedPan, setCopiedPan] = useState<string | null>(null);
+
+    // Today date check
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayAllotmentIpos = ipos.filter((ipo) => ipo.allotment_date?.split('T')[0] === todayStr);
 
     const copyPan = (pan: string) => {
         navigator.clipboard.writeText(pan);
         setCopiedPan(pan);
         setTimeout(() => setCopiedPan(null), 2000);
+    };
+
+    const handleFilterChange = (key: string, value: string) => {
+        const query: Record<string, string> = {
+            ipo_id: selectedIpo,
+            user_id: selectedUser,
+            funding_source: selectedFunding,
+            application_status: selectedStatus,
+            settlement_status: selectedSettlement,
+            search: searchInput,
+            allotment_today: isAllotmentTodayFilter ? '1' : '',
+            [key]: value,
+        };
+
+        Object.keys(query).forEach((k) => {
+            if (query[k] === 'all' || !query[k]) delete query[k];
+        });
+
+        router.get('/applications', query, { preserveState: true, replace: true });
+    };
+
+    const handleSearchSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        handleFilterChange('search', searchInput);
+    };
+
+    const clearSearch = () => {
+        setSearchInput('');
+        handleFilterChange('search', '');
+    };
+
+    const toggleAllotmentTodayFilter = () => {
+        handleFilterChange('allotment_today', isAllotmentTodayFilter ? 'all' : '1');
     };
 
     const handleCheckAllotment = async (batch: ApplicationBatch) => {
@@ -128,7 +181,6 @@ export default function ApplicationsIndex({
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
                 pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
             });
-            // Refresh table data smoothly
             router.reload({ only: ['batches'] });
         } catch (err: any) {
             setAllotmentResult({
@@ -161,6 +213,66 @@ export default function ApplicationsIndex({
         router.post(`/applications/${batchId}/reject`, {}, { preserveScroll: true });
     };
 
+    // Open PAN modal for a batch
+    const openPanModal = (batch: ApplicationBatch) => {
+        setPanModalBatch(batch);
+        const existingPan = batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot || '';
+        setPanModalPanNumber(existingPan);
+        setPanModalApplicantName(batch.applicant_name || '');
+        setPanModalSearchQuery('');
+        setPanModalDropdownOpen(false);
+
+        const matched = userPans.find((p) => p.pan_number === existingPan);
+        if (matched) {
+            setPanModalPanId(String(matched.id));
+            setPanModalIsNewPan(false);
+        } else if (existingPan) {
+            setPanModalPanId('');
+            setPanModalIsNewPan(true);
+        } else {
+            setPanModalPanId('');
+            setPanModalIsNewPan(userPans.length === 0);
+        }
+    };
+
+    const handleSelectModalSavedPan = (p: UserPan) => {
+        setPanModalPanId(String(p.id));
+        setPanModalPanNumber(p.pan_number);
+        if (p.account_holder_name && !panModalApplicantName) {
+            setPanModalApplicantName(p.account_holder_name);
+        }
+        setPanModalDropdownOpen(false);
+    };
+
+    const handlePanModalSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!panModalBatch) return;
+        setIsSavingPan(true);
+        router.post(`/applications/${panModalBatch.id}/pan`, {
+            pan_id: panModalPanId ? Number(panModalPanId) : null,
+            pan_number: panModalPanNumber.toUpperCase().trim(),
+            applicant_name: panModalApplicantName.trim(),
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setPanModalBatch(null);
+                setIsSavingPan(false);
+            },
+            onError: () => setIsSavingPan(false),
+        });
+    };
+
+    const filteredSavedPans = userPans.filter((p) => {
+        if (!panModalSearchQuery.trim()) return true;
+        const q = panModalSearchQuery.toLowerCase();
+        return (
+            p.pan_number.toLowerCase().includes(q) ||
+            (p.account_holder_name && p.account_holder_name.toLowerCase().includes(q)) ||
+            (p.broker_name && p.broker_name.toLowerCase().includes(q)) ||
+            (p.user?.name && p.user.name.toLowerCase().includes(q))
+        );
+    });
+
     const formatInr = (amount: number | string | null | undefined) => {
         const val = Number(amount) || 0;
         return new Intl.NumberFormat('en-IN', {
@@ -187,23 +299,6 @@ export default function ApplicationsIndex({
             default:
                 return 'bg-neutral-100 text-neutral-700 border-neutral-200 dark:bg-neutral-800 dark:text-neutral-300';
         }
-    };
-
-    const handleFilterChange = (key: string, value: string) => {
-        const query: Record<string, string> = {
-            ipo_id: selectedIpo,
-            user_id: selectedUser,
-            funding_source: selectedFunding,
-            application_status: selectedStatus,
-            settlement_status: selectedSettlement,
-            [key]: value,
-        };
-
-        Object.keys(query).forEach((k) => {
-            if (query[k] === 'all' || !query[k]) delete query[k];
-        });
-
-        router.get('/applications', query, { preserveState: true, replace: true });
     };
 
     const handleStatusChange = (batchId: number, status: 'allotted' | 'not_allotted') => {
@@ -236,24 +331,109 @@ export default function ApplicationsIndex({
                 {/* Header */}
                 <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
                     <div>
-                        <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50">
+                        <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 flex items-center gap-2">
                             {isAdmin ? 'All Application Batches' : 'My Applications'}
+                            {allotmentTodayCount > 0 && (
+                                <Badge className="bg-amber-500 text-white font-bold text-xs tracking-wide">
+                                    <Sparkles className="h-3 w-3 mr-1" />
+                                    {allotmentTodayCount} Allotment Today
+                                </Badge>
+                            )}
                         </h1>
                         <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                            Historical records and rate snapshots for each application submission.
+                            Historical records, saved PANs, and live allotment status for each application submission.
                         </p>
                     </div>
 
-                    <Button asChild className="bg-emerald-600 hover:bg-emerald-700 text-white">
-                        <Link href="/ipos">
-                            <Plus className="mr-2 h-4 w-4" />
-                            Apply in Active IPO
-                        </Link>
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Button asChild className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                            <Link href="/ipos">
+                                <Plus className="mr-2 h-4 w-4" />
+                                Apply in Active IPO
+                            </Link>
+                        </Button>
+                    </div>
                 </div>
 
-                {/* Filters */}
+                {/* Allotment Day Notification Banner */}
+                {(todayAllotmentIpos.length > 0 || allotmentTodayCount > 0) && (
+                    <div className="rounded-xl border border-amber-300 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 p-4 shadow-sm dark:border-amber-900/50 dark:from-amber-950/40 dark:via-orange-950/20 dark:to-amber-950/40">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white shadow">
+                                    <Sparkles className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                                        Today is Allotment Day!
+                                        <Badge className="bg-amber-600 text-white font-bold text-[10px]">
+                                            {allotmentTodayCount} Applications
+                                        </Badge>
+                                    </h3>
+                                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                                        Scheduled registrar allotment today for:{' '}
+                                        <strong className="font-semibold">
+                                            {todayAllotmentIpos.map((i) => i.company_name).join(', ') || 'Active IPOs'}
+                                        </strong>
+                                        . Check live allotment status against the KFintech portal.
+                                    </p>
+                                </div>
+                            </div>
+                            <Button
+                                size="sm"
+                                variant={isAllotmentTodayFilter ? 'default' : 'outline'}
+                                className={
+                                    isAllotmentTodayFilter
+                                        ? 'bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs shadow-sm'
+                                        : 'border-amber-400 text-amber-900 dark:text-amber-200 bg-white/80 dark:bg-neutral-900/80 hover:bg-amber-100 text-xs font-semibold'
+                                }
+                                onClick={toggleAllotmentTodayFilter}
+                            >
+                                <Filter className="h-3.5 w-3.5 mr-1" />
+                                {isAllotmentTodayFilter ? 'Show All Applications' : "Filter Today's Allotments"}
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Filters & Search Toolbar */}
                 <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+                    {/* Search Input (PAN, Applicant, Batch, Bank, UPI) */}
+                    <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-[220px]">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" />
+                        <Input
+                            placeholder="Search by PAN, applicant, batch #..."
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            className="h-9 pl-8 pr-8 text-xs font-mono"
+                        />
+                        {searchInput && (
+                            <button
+                                type="button"
+                                onClick={clearSearch}
+                                className="absolute right-2.5 top-2.5 text-neutral-400 hover:text-neutral-600"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        )}
+                    </form>
+
+                    {/* Allotment Today Quick Filter Button */}
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant={isAllotmentTodayFilter ? 'default' : 'outline'}
+                        onClick={toggleAllotmentTodayFilter}
+                        className={`h-9 text-xs font-medium ${
+                            isAllotmentTodayFilter
+                                ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs'
+                                : 'border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-300 hover:bg-amber-50'
+                        }`}
+                    >
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                        Allotment Today {allotmentTodayCount > 0 ? `(${allotmentTodayCount})` : ''}
+                    </Button>
+
                     <Select
                         value={selectedIpo}
                         onValueChange={(val) => {
@@ -261,7 +441,7 @@ export default function ApplicationsIndex({
                             handleFilterChange('ipo_id', val);
                         }}
                     >
-                        <SelectTrigger className="w-[180px]">
+                        <SelectTrigger className="w-[180px] h-9 text-xs">
                             <SelectValue placeholder="All IPOs" />
                         </SelectTrigger>
                         <SelectContent>
@@ -282,7 +462,7 @@ export default function ApplicationsIndex({
                                 handleFilterChange('user_id', val);
                             }}
                         >
-                            <SelectTrigger className="w-[160px]">
+                            <SelectTrigger className="w-[150px] h-9 text-xs">
                                 <SelectValue placeholder="All Users" />
                             </SelectTrigger>
                             <SelectContent>
@@ -303,7 +483,7 @@ export default function ApplicationsIndex({
                             handleFilterChange('funding_source', val);
                         }}
                     >
-                        <SelectTrigger className="w-[150px]">
+                        <SelectTrigger className="w-[140px] h-9 text-xs">
                             <SelectValue placeholder="Funding" />
                         </SelectTrigger>
                         <SelectContent>
@@ -320,7 +500,7 @@ export default function ApplicationsIndex({
                             handleFilterChange('application_status', val);
                         }}
                     >
-                        <SelectTrigger className="w-[150px]">
+                        <SelectTrigger className="w-[140px] h-9 text-xs">
                             <SelectValue placeholder="App Status" />
                         </SelectTrigger>
                         <SelectContent>
@@ -329,6 +509,7 @@ export default function ApplicationsIndex({
                             <SelectItem value="submitted">Submitted</SelectItem>
                             <SelectItem value="confirmed">Confirmed</SelectItem>
                             <SelectItem value="allotted">Allotted</SelectItem>
+                            <SelectItem value="not_allotted">Not Allotted</SelectItem>
                             <SelectItem value="cancelled">Cancelled</SelectItem>
                         </SelectContent>
                     </Select>
@@ -340,7 +521,7 @@ export default function ApplicationsIndex({
                             handleFilterChange('settlement_status', val);
                         }}
                     >
-                        <SelectTrigger className="w-[160px]">
+                        <SelectTrigger className="w-[140px] h-9 text-xs">
                             <SelectValue placeholder="Settlement" />
                         </SelectTrigger>
                         <SelectContent>
@@ -357,7 +538,9 @@ export default function ApplicationsIndex({
                     <CardContent className="p-0">
                         {batches.data.length === 0 ? (
                             <div className="py-12 text-center text-sm text-neutral-500">
-                                No applications match the selected criteria.
+                                {isAllotmentTodayFilter
+                                    ? 'No applications have scheduled allotment today.'
+                                    : 'No applications match the selected criteria.'}
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
@@ -388,17 +571,30 @@ export default function ApplicationsIndex({
                                             const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval;
                                             const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
+                                            const isAllotmentToday = batch.ipo?.allotment_date
+                                                ? batch.ipo.allotment_date.split('T')[0] === todayStr
+                                                : false;
+
                                             return (
-                                                <tr key={batch.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
+                                                <tr
+                                                    key={batch.id}
+                                                    className={`transition-colors ${
+                                                        isAllotmentToday
+                                                            ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70 border-l-4 border-l-amber-500'
+                                                            : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
+                                                    }`}
+                                                >
                                                     <td className="py-3 px-4">
                                                         <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
                                                             {batch.applicant_name || batch.user?.name || 'Applicant'}
                                                         </span>
-                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                                             <span className="font-mono text-xs text-neutral-400">
                                                                 {batch.batch_number}
                                                             </span>
-                                                            {panDisplay && (
+
+                                                            {/* PAN Display & Quick Action */}
+                                                            {panDisplay ? (
                                                                 <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-neutral-700 dark:text-neutral-300 font-medium">
                                                                     PAN: {panDisplay}
                                                                     {isAdmin && panNumberRaw && (
@@ -415,7 +611,24 @@ export default function ApplicationsIndex({
                                                                             )}
                                                                         </button>
                                                                     )}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openPanModal(batch)}
+                                                                        className="text-[10px] text-blue-600 hover:underline dark:text-blue-400 font-sans ml-1"
+                                                                        title="Change or link saved PAN"
+                                                                    >
+                                                                        Edit
+                                                                    </button>
                                                                 </span>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openPanModal(batch)}
+                                                                    className="inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-medium bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded border border-dashed border-blue-300 dark:border-blue-800"
+                                                                    title="Attach a saved PAN"
+                                                                >
+                                                                    <Plus className="h-3 w-3" /> Add Saved PAN
+                                                                </button>
                                                             )}
                                                         </div>
                                                     </td>
@@ -423,9 +636,16 @@ export default function ApplicationsIndex({
                                                         <Link href={`/ipos/${batch.ipo_id}`} className="hover:underline text-blue-600 dark:text-blue-400">
                                                             {batch.ipo?.company_name}
                                                         </Link>
-                                                        <span className="text-[11px] text-neutral-400 block">
-                                                            {batch.application_count} lot(s) ({batch.application_count * (batch.ipo?.lot_size || 1)} sh)
-                                                        </span>
+                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                            <span className="text-[11px] text-neutral-400 block">
+                                                                {batch.application_count} lot(s) ({batch.application_count * (batch.ipo?.lot_size || 1)} sh)
+                                                            </span>
+                                                            {isAllotmentToday && (
+                                                                <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-4">
+                                                                    <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Allotment Today
+                                                                </Badge>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         {batch.bank_name ? (
@@ -557,12 +777,16 @@ export default function ApplicationsIndex({
                                                             {panNumberRaw && batch.application_status !== 'cancelled' && (
                                                                 <Button
                                                                     size="sm"
-                                                                    variant="outline"
+                                                                    variant={isAllotmentToday ? 'default' : 'outline'}
                                                                     onClick={() => handleCheckAllotment(batch)}
-                                                                    className="h-7 px-2 text-xs border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50 font-medium"
-                                                                    title="Live scrape allotment status from KFintech portal"
+                                                                    className={`h-7 px-2.5 text-xs font-semibold ${
+                                                                        isAllotmentToday
+                                                                            ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
+                                                                            : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
+                                                                    }`}
+                                                                    title={isAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : 'Live scrape allotment status from KFintech portal'}
                                                                 >
-                                                                    <Search className="h-3 w-3 mr-1 text-sky-600" /> Check Allotment
+                                                                    <Search className={`h-3 w-3 mr-1 ${isAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
                                                                 </Button>
                                                             )}
 
@@ -637,6 +861,199 @@ export default function ApplicationsIndex({
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Attach / Update PAN Modal */}
+            <Dialog open={!!panModalBatch} onOpenChange={() => setPanModalBatch(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Sparkles className="h-5 w-5 text-blue-600" />
+                            {panModalPanNumber ? 'Update PAN' : 'Attach PAN'} for {panModalBatch?.batch_number}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Select a saved PAN with search or enter a new one to enable KFintech live allotment verification.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form onSubmit={handlePanModalSubmit} className="space-y-4 pt-1">
+                        <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                                <Label htmlFor="modal_pan">PAN Number *</Label>
+                                {userPans.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setPanModalIsNewPan(!panModalIsNewPan);
+                                            setPanModalDropdownOpen(false);
+                                            if (!panModalIsNewPan) {
+                                                setPanModalPanId('');
+                                                setPanModalPanNumber('');
+                                            }
+                                        }}
+                                        className="text-[11px] text-blue-600 hover:underline dark:text-blue-400 font-medium"
+                                    >
+                                        {panModalIsNewPan ? 'Select Saved PAN' : '+ Type New PAN'}
+                                    </button>
+                                )}
+                            </div>
+
+                            {!panModalIsNewPan && userPans.length > 0 ? (
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPanModalDropdownOpen(!panModalDropdownOpen)}
+                                        className="w-full flex items-center justify-between h-9 px-3 py-1.5 text-xs rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xs hover:border-neutral-300 dark:hover:border-neutral-700 transition"
+                                    >
+                                        {panModalPanNumber ? (
+                                            <div className="flex items-center gap-1.5 truncate text-left">
+                                                <span className="font-mono font-bold text-neutral-900 dark:text-neutral-100">
+                                                    {isAdmin ? panModalPanNumber : `XXXXXX${panModalPanNumber.slice(-4)}`}
+                                                </span>
+                                                {(() => {
+                                                    const matched = userPans.find((p) => p.pan_number === panModalPanNumber);
+                                                    return matched?.account_holder_name ? (
+                                                        <span className="text-neutral-500 truncate text-[11px]">
+                                                            • {matched.account_holder_name}
+                                                        </span>
+                                                    ) : null;
+                                                })()}
+                                            </div>
+                                        ) : (
+                                            <span className="text-neutral-400">Select or search saved PAN...</span>
+                                        )}
+                                        <ChevronDown className={`h-3.5 w-3.5 text-neutral-400 shrink-0 ml-1 transition-transform ${panModalDropdownOpen ? 'rotate-180' : ''}`} />
+                                    </button>
+
+                                    {panModalDropdownOpen && (
+                                        <div className="absolute z-50 mt-1 w-full rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xl p-2 space-y-1.5">
+                                            <div className="relative">
+                                                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
+                                                <Input
+                                                    placeholder="Search PAN, name, broker..."
+                                                    value={panModalSearchQuery}
+                                                    onChange={(e) => setPanModalSearchQuery(e.target.value)}
+                                                    className="h-8 pl-8 text-xs font-normal"
+                                                    autoFocus
+                                                />
+                                            </div>
+
+                                            <div className="max-h-48 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800">
+                                                {filteredSavedPans.length === 0 ? (
+                                                    <div className="py-3 px-2 text-center text-xs text-neutral-400">
+                                                        No saved PANs match "{panModalSearchQuery}".
+                                                        {panModalSearchQuery.trim().length === 10 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setPanModalPanNumber(panModalSearchQuery.trim().toUpperCase());
+                                                                    setPanModalPanId('');
+                                                                    setPanModalDropdownOpen(false);
+                                                                }}
+                                                                className="block mx-auto mt-1.5 text-xs text-blue-600 hover:underline font-semibold"
+                                                            >
+                                                                Use "{panModalSearchQuery.trim().toUpperCase()}"
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    filteredSavedPans.map((p) => (
+                                                        <button
+                                                            key={p.id}
+                                                            type="button"
+                                                            onClick={() => handleSelectModalSavedPan(p)}
+                                                            className={`w-full text-left py-2 px-2.5 rounded-md text-xs flex items-center justify-between transition ${
+                                                                panModalPanNumber === p.pan_number
+                                                                    ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-200 font-semibold'
+                                                                    : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200'
+                                                            }`}
+                                                        >
+                                                            <div>
+                                                                <div className="flex items-center gap-1.5 font-mono">
+                                                                    <span className="font-bold">{isAdmin ? p.pan_number : p.masked_pan}</span>
+                                                                    {p.broker_name && (
+                                                                        <span className="text-[10px] text-neutral-400 font-sans">
+                                                                            ({p.broker_name})
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                {p.account_holder_name && (
+                                                                    <span className="text-[11px] text-neutral-500 block truncate max-w-[200px]">
+                                                                        {p.account_holder_name}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {isAdmin && p.user?.name && (
+                                                                <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-neutral-300">
+                                                                    {p.user.name}
+                                                                </Badge>
+                                                            )}
+                                                        </button>
+                                                    ))
+                                                )}
+                                            </div>
+
+                                            <div className="pt-1.5 border-t border-neutral-100 dark:border-neutral-800 flex justify-between items-center text-[11px]">
+                                                <span className="text-neutral-400">Total: {userPans.length} saved</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setPanModalIsNewPan(true);
+                                                        setPanModalDropdownOpen(false);
+                                                        setPanModalPanNumber('');
+                                                        setPanModalPanId('');
+                                                    }}
+                                                    className="text-blue-600 hover:underline dark:text-blue-400 font-medium"
+                                                >
+                                                    + Type New PAN
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <Input
+                                    id="modal_pan"
+                                    placeholder="e.g. ABCDE1234F"
+                                    maxLength={10}
+                                    value={panModalPanNumber}
+                                    onChange={(e) => setPanModalPanNumber(e.target.value.toUpperCase())}
+                                    className="font-mono uppercase text-sm"
+                                    required
+                                    autoFocus
+                                />
+                            )}
+                        </div>
+
+                        <div className="space-y-1">
+                            <Label htmlFor="modal_applicant_name">Applicant Name (Optional)</Label>
+                            <Input
+                                id="modal_applicant_name"
+                                placeholder="e.g. Rahul Sharma"
+                                value={panModalApplicantName}
+                                onChange={(e) => setPanModalApplicantName(e.target.value)}
+                            />
+                        </div>
+
+                        <DialogFooter className="gap-2 sm:gap-0 pt-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setPanModalBatch(null)}
+                                disabled={isSavingPan}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+                                disabled={isSavingPan || (!panModalPanId && panModalPanNumber.trim().length !== 10)}
+                            >
+                                {isSavingPan ? 'Saving...' : 'Save & Attach PAN'}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
 
             {/* KFintech Allotment Status Modal */}
             <KfintechAllotmentModal

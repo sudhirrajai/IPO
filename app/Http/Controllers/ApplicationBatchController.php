@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ApplicationBatch;
 use App\Models\Ipo;
 use App\Models\User;
+use App\Models\UserPan;
 use App\Services\ApplicationBatchService;
 use App\Services\AuditService;
 use Exception;
@@ -19,6 +20,7 @@ class ApplicationBatchController extends Controller
     {
         $user = $request->user();
         $isAdmin = $user->isAdmin();
+        $today = now()->format('Y-m-d');
 
         $query = ApplicationBatch::with(['ipo', 'user', 'rate', 'batchPans.userPan', 'settlement']);
 
@@ -44,6 +46,35 @@ class ApplicationBatchController extends Controller
             $query->where('settlement_status', $request->settlement_status);
         }
 
+        if ($request->filled('allotment_today') && $request->allotment_today === '1') {
+            $query->whereHas('ipo', function ($q) use ($today) {
+                $q->whereDate('allotment_date', $today);
+            });
+        }
+
+        if ($request->filled('search')) {
+            $search = trim($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->where('pan_number', 'like', "%{$search}%")
+                    ->orWhere('applicant_name', 'like', "%{$search}%")
+                    ->orWhere('batch_number', 'like', "%{$search}%")
+                    ->orWhere('bank_name', 'like', "%{$search}%")
+                    ->orWhere('upi_id', 'like', "%{$search}%")
+                    ->orWhereHas('batchPans', function ($bp) use ($search) {
+                        $bp->where('pan_number_snapshot', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        // Count batches whose IPO allotment is today
+        $todayQuery = ApplicationBatch::whereHas('ipo', function ($q) use ($today) {
+            $q->whereDate('allotment_date', $today);
+        });
+        if (! $isAdmin) {
+            $todayQuery->where('user_id', $user->id);
+        }
+        $allotmentTodayCount = $todayQuery->count();
+
         $batches = $query->orderByDesc('id')->paginate(15)->withQueryString();
 
         if (! $isAdmin) {
@@ -57,14 +88,20 @@ class ApplicationBatchController extends Controller
             ]);
         }
 
-        $ipos = Ipo::select(['id', 'company_name', 'symbol', 'status'])->orderBy('company_name')->get();
+        $ipos = Ipo::select(['id', 'company_name', 'symbol', 'status', 'allotment_date'])->orderBy('company_name')->get();
         $users = $isAdmin ? User::select(['id', 'name', 'email'])->orderBy('name')->get() : [];
+
+        $userPans = $isAdmin
+            ? UserPan::with('user:id,name')->where('status', 'active')->orderBy('account_holder_name')->get()
+            : UserPan::where('user_id', $user->id)->where('status', 'active')->orderBy('account_holder_name')->get();
 
         return Inertia::render('applications/index', [
             'batches' => $batches,
             'ipos' => $ipos,
             'users' => $users,
-            'filters' => $request->only(['ipo_id', 'user_id', 'funding_source', 'application_status', 'settlement_status']),
+            'userPans' => $userPans,
+            'allotmentTodayCount' => $allotmentTodayCount,
+            'filters' => $request->only(['ipo_id', 'user_id', 'funding_source', 'application_status', 'settlement_status', 'search', 'allotment_today']),
             'isAdmin' => $isAdmin,
         ]);
     }
@@ -224,5 +261,71 @@ class ApplicationBatchController extends Controller
         AuditService::log('batch_rejected', $batch, null, ['rejected_by' => $request->user()->name]);
 
         return back()->with('success', "Application {$batch->batch_number} rejected.");
+    }
+
+    public function updatePan(Request $request, ApplicationBatch $batch): RedirectResponse
+    {
+        $user = $request->user();
+        if (! $user->isAdmin() && $batch->user_id !== $user->id) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $validated = $request->validate([
+            'pan_number' => 'nullable|string|max:10',
+            'pan_id' => 'nullable|exists:user_pans,id',
+            'applicant_name' => 'nullable|string|max:150',
+        ]);
+
+        $panNum = null;
+        if (! empty($validated['pan_id'])) {
+            $savedPan = UserPan::find($validated['pan_id']);
+            if ($savedPan) {
+                $panNum = strtoupper($savedPan->pan_number);
+                if (empty($validated['applicant_name']) && ! empty($savedPan->account_holder_name)) {
+                    $validated['applicant_name'] = $savedPan->account_holder_name;
+                }
+            }
+        } elseif (! empty($validated['pan_number'])) {
+            $panNum = strtoupper(trim($validated['pan_number']));
+            UserPan::firstOrCreate([
+                'user_id' => $batch->user_id,
+                'pan_number' => $panNum,
+            ], [
+                'account_holder_name' => $validated['applicant_name'] ?? $batch->applicant_name ?? 'Applicant',
+                'status' => 'active',
+            ]);
+        }
+
+        if ($panNum) {
+            $updateData = ['pan_number' => $panNum];
+            if (! empty($validated['applicant_name'])) {
+                $updateData['applicant_name'] = $validated['applicant_name'];
+            }
+            $batch->update($updateData);
+
+            $batchPan = $batch->batchPans()->first();
+            if ($batchPan) {
+                $batchPan->update([
+                    'pan_number_snapshot' => $panNum,
+                    'user_pan_id' => $validated['pan_id'] ?? $batchPan->user_pan_id,
+                ]);
+            } else {
+                $batch->batchPans()->create([
+                    'user_pan_id' => $validated['pan_id'] ?? null,
+                    'pan_number_snapshot' => $panNum,
+                    'shares_allotted' => 0,
+                    'is_allotted' => false,
+                ]);
+            }
+
+            AuditService::log('pan_updated', $batch, null, [
+                'pan_number' => $panNum,
+                'updated_by' => $user->name,
+            ]);
+
+            return back()->with('success', "PAN updated to {$panNum} for {$batch->batch_number}.");
+        }
+
+        return back()->with('error', 'No valid PAN provided.');
     }
 }
