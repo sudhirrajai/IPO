@@ -2,11 +2,14 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
     Calendar,
     ChevronRight,
-    Filter,
+    Coins,
+    LayoutGrid,
+    List,
     Plus,
     RefreshCw,
     Search,
     TrendingUp,
+    Zap,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -66,6 +69,7 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
     const [search, setSearch] = useState(filters.search || '');
     const [statusFilter, setStatusFilter] = useState(filters.status || 'all');
     const [typeFilter, setTypeFilter] = useState(filters.type || 'all');
+    const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
     const [isCreateOpen, setIsCreateOpen] = useState(false);
 
     // Create IPO form state
@@ -146,42 +150,49 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="IPO Listings & Rates" />
 
-            <div className="flex flex-1 flex-col gap-6 p-6">
+            <div className="flex flex-1 flex-col gap-5 p-4 sm:p-6 max-w-7xl mx-auto w-full">
                 {/* Header */}
-                <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                     <div>
-                        <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50">
-                            IPO Listings & Rates
+                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 flex items-center gap-2">
+                            <span>IPO Listings</span>
+                            <span className="text-xs font-normal text-neutral-500 font-mono">
+                                ({ipos.total} total)
+                            </span>
                         </h1>
-                        <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                            Dynamic real-time IPO listings categorized by bidding status.
+                        <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400">
+                            Track live grey market premium (GMP), dates, rates and applications.
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                         {isAdmin && (
                             <>
-                                <Button asChild variant="outline">
+                                <Button asChild variant="outline" size="sm" className="h-9 text-xs">
                                     <Link href="/sync">
-                                        <RefreshCw className="mr-2 h-4 w-4" />
-                                        Sync Upstox API
+                                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                                        Sync API
                                     </Link>
                                 </Button>
-                                <Button onClick={() => setIsCreateOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-                                    <Plus className="mr-2 h-4 w-4" />
-                                    Add IPO Manually
+                                <Button
+                                    size="sm"
+                                    onClick={() => setIsCreateOpen(true)}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 text-xs font-semibold"
+                                >
+                                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                                    Add IPO
                                 </Button>
                             </>
                         )}
                     </div>
                 </div>
 
-                {/* Primary Categorization Tabs */}
-                <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 pb-3 dark:border-neutral-800">
+                {/* Primary Categorization Tabs (Mobile Swipeable) */}
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-neutral-200 pb-3 dark:border-neutral-800 -mx-4 px-4 sm:mx-0 sm:px-0">
                     <button
                         type="button"
                         onClick={() => handleFilterChange('status', 'all')}
-                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
                             statusFilter === 'all'
                                 ? 'bg-neutral-900 text-white shadow-sm dark:bg-white dark:text-neutral-900'
                                 : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white'
@@ -189,7 +200,7 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     >
                         <span>All IPOs</span>
                         <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-mono font-bold ${
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
                                 statusFilter === 'all'
                                     ? 'bg-neutral-700 text-white dark:bg-neutral-200 dark:text-neutral-900'
                                     : 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
@@ -202,19 +213,19 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     <button
                         type="button"
                         onClick={() => handleFilterChange('status', 'open')}
-                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
                             statusFilter === 'open'
                                 ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-600/30'
                                 : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
                         }`}
                     >
-                        <span className="relative flex h-2.5 w-2.5">
+                        <span className="relative flex h-2 w-2">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                         </span>
                         <span>Open for Bidding</span>
                         <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-mono font-bold ${
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
                                 statusFilter === 'open'
                                     ? 'bg-emerald-700 text-white'
                                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300'
@@ -227,16 +238,16 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     <button
                         type="button"
                         onClick={() => handleFilterChange('status', 'upcoming')}
-                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
                             statusFilter === 'upcoming'
                                 ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-600/30'
                                 : 'text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40'
                         }`}
                     >
-                        <Calendar className="h-4 w-4" />
+                        <Calendar className="h-3.5 w-3.5" />
                         <span>Upcoming</span>
                         <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-mono font-bold ${
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
                                 statusFilter === 'upcoming'
                                     ? 'bg-blue-700 text-white'
                                     : 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300'
@@ -249,7 +260,7 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     <button
                         type="button"
                         onClick={() => handleFilterChange('status', 'closed')}
-                        className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
                             statusFilter === 'closed'
                                 ? 'bg-neutral-600 text-white shadow-sm ring-2 ring-neutral-600/30'
                                 : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800'
@@ -257,7 +268,7 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     >
                         <span>Closed</span>
                         <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-mono font-bold ${
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
                                 statusFilter === 'closed'
                                     ? 'bg-neutral-700 text-white'
                                     : 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
@@ -268,19 +279,19 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     </button>
                 </div>
 
-                {/* Filter and Search Bar */}
-                <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm dark:border-neutral-800 dark:bg-neutral-900 md:flex-row md:items-center md:justify-between">
+                {/* Filter and Search Bar + View Toggle */}
+                <div className="flex flex-col gap-2.5 rounded-xl border border-neutral-200 bg-white p-3 shadow-xs dark:border-neutral-800 dark:bg-neutral-900 sm:flex-row sm:items-center sm:justify-between">
                     <form onSubmit={handleSearchSubmit} className="relative flex-1">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
                         <Input
-                            placeholder="Search company or symbol..."
+                            placeholder="Search IPO company or symbol..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="pl-9"
+                            className="pl-9 h-9 text-xs sm:text-sm"
                         />
                     </form>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 justify-between sm:justify-end">
                         <Select
                             value={typeFilter}
                             onValueChange={(val) => {
@@ -288,27 +299,186 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                 handleFilterChange('type', val);
                             }}
                         >
-                            <SelectTrigger className="w-[150px]">
+                            <SelectTrigger className="w-[140px] h-9 text-xs">
                                 <SelectValue placeholder="Category" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all">All Market Types</SelectItem>
+                                <SelectItem value="all">All Markets</SelectItem>
                                 <SelectItem value="mainboard">Mainboard</SelectItem>
                                 <SelectItem value="sme">SME</SelectItem>
                             </SelectContent>
                         </Select>
+
+                        {/* View Mode Toggle: List vs Grid */}
+                        <div className="inline-flex rounded-lg border border-neutral-200 dark:border-neutral-800 p-0.5 bg-neutral-50 dark:bg-neutral-900/50">
+                            <button
+                                type="button"
+                                onClick={() => setViewMode('list')}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                                    viewMode === 'list'
+                                        ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-50 shadow-xs'
+                                        : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400'
+                                }`}
+                                title="Compact List View"
+                                aria-label="Compact List View"
+                            >
+                                <List className="h-3.5 w-3.5" />
+                                <span className="hidden xs:inline">List</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setViewMode('grid')}
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                                    viewMode === 'grid'
+                                        ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-50 shadow-xs'
+                                        : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400'
+                                }`}
+                                title="Grid Cards View"
+                                aria-label="Grid Cards View"
+                            >
+                                <LayoutGrid className="h-3.5 w-3.5" />
+                                <span className="hidden xs:inline">Grid</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                {/* Grid of IPO Cards */}
+                {/* IPOs Display */}
                 {ipos.data.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-neutral-300 p-12 text-center dark:border-neutral-700">
-                        <TrendingUp className="mx-auto h-8 w-8 text-neutral-400" />
-                        <h3 className="mt-2 text-base font-semibold">No IPOs found</h3>
-                        <p className="mt-1 text-sm text-neutral-500">Try adjusting your filters or sync with an external provider.</p>
+                    <div className="rounded-2xl border border-dashed border-neutral-300 p-12 text-center dark:border-neutral-800 bg-white/50 dark:bg-neutral-900/30">
+                        <TrendingUp className="mx-auto h-9 w-9 text-neutral-400" />
+                        <h3 className="mt-3 text-base font-semibold text-neutral-900 dark:text-neutral-100">No IPOs found</h3>
+                        <p className="mt-1 text-xs text-neutral-500 max-w-sm mx-auto">
+                            Try adjusting your filters or sync with an external IPO provider.
+                        </p>
+                    </div>
+                ) : viewMode === 'list' ? (
+                    /* COMPACT LIST VIEW - Mobile First & Tap Friendly */
+                    <div className="space-y-2.5">
+                        {ipos.data.map((ipo) => {
+                            const isIpoOpen = ipo.status === 'open';
+                            const isIpoUpcoming = ipo.status === 'upcoming';
+                            const priceBandMax = Number(ipo.price_band_max || ipo.issue_price || 0);
+                            const gmpVal = ipo.gmp !== null && ipo.gmp !== undefined ? Number(ipo.gmp) : null;
+                            const gmpPercent = gmpVal !== null && priceBandMax > 0
+                                ? ((gmpVal / priceBandMax) * 100).toFixed(1)
+                                : null;
+                            const lotCost = priceBandMax && ipo.lot_size
+                                ? (priceBandMax * Number(ipo.lot_size)).toLocaleString('en-IN')
+                                : null;
+
+                            return (
+                                <Link
+                                    key={ipo.id}
+                                    href={`/ipos/${ipo.id}`}
+                                    prefetch="hover"
+                                    className="group block rounded-xl border border-neutral-200/90 bg-white p-3.5 sm:p-4 transition-all hover:border-emerald-500/50 hover:shadow-md dark:border-neutral-800/80 dark:bg-neutral-900/80 dark:hover:border-emerald-500/40 active:scale-[0.99]"
+                                >
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                        {/* Left: Info */}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                <Badge
+                                                    variant="outline"
+                                                    className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0 bg-neutral-50 dark:bg-neutral-800/60"
+                                                >
+                                                    {ipo.ipo_type || 'Mainboard'} · {ipo.exchange || 'NSE/BSE'}
+                                                </Badge>
+
+                                                <Badge
+                                                    className={`capitalize text-[10px] font-semibold px-2 py-0.2 ${
+                                                        isIpoOpen
+                                                            ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30'
+                                                            : isIpoUpcoming
+                                                            ? 'bg-blue-500/10 text-blue-600 border border-blue-500/30'
+                                                            : 'bg-neutral-500/10 text-neutral-600 border border-neutral-500/20'
+                                                    }`}
+                                                >
+                                                    {isIpoOpen && (
+                                                        <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                                    )}
+                                                    {ipo.status}
+                                                </Badge>
+
+                                                {ipo.active_rate && (
+                                                    <Badge className="bg-emerald-600/10 text-emerald-700 border-emerald-600/20 dark:text-emerald-300 text-[10px] font-semibold">
+                                                        ₹{ipo.active_rate.published_rate} / app
+                                                    </Badge>
+                                                )}
+                                            </div>
+
+                                            <h3 className="font-bold text-sm sm:text-base text-neutral-900 dark:text-neutral-50 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">
+                                                {ipo.company_name}
+                                            </h3>
+
+                                            <div className="mt-1 flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400 flex-wrap">
+                                                <span className="font-mono text-[11px] text-neutral-400">
+                                                    {ipo.symbol || 'SYMBOL TBD'}
+                                                </span>
+                                                <span>•</span>
+                                                <span>
+                                                    Price: <strong className="text-neutral-800 dark:text-neutral-200">
+                                                        {ipo.price_band_min && ipo.price_band_max
+                                                            ? `₹${ipo.price_band_min} - ₹${ipo.price_band_max}`
+                                                            : ipo.issue_price
+                                                            ? `₹${ipo.issue_price}`
+                                                            : 'TBD'}
+                                                    </strong>
+                                                </span>
+                                                <span>•</span>
+                                                <span>
+                                                    Lot: <strong className="text-neutral-800 dark:text-neutral-200">{ipo.lot_size} sh</strong>
+                                                    {lotCost && ` (₹${lotCost})`}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Right: GMP, Dates & Action Arrow */}
+                                        <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-100 dark:border-neutral-800/80">
+                                            {/* GMP Tag */}
+                                            <div className="text-left sm:text-right">
+                                                <span className="text-[10px] uppercase font-semibold text-neutral-400 block">
+                                                    GMP Premium
+                                                </span>
+                                                <div className="flex items-baseline gap-1 sm:justify-end">
+                                                    <span className="text-sm sm:text-base font-bold text-emerald-600 dark:text-emerald-400">
+                                                        {gmpVal !== null ? `+₹${gmpVal}` : 'N/A'}
+                                                    </span>
+                                                    {gmpPercent && (
+                                                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300 px-1 rounded">
+                                                            +{gmpPercent}%
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Dates */}
+                                            <div className="text-right">
+                                                <span className="text-[10px] uppercase font-semibold text-neutral-400 block">
+                                                    {isIpoOpen ? 'Bidding Closes' : isIpoUpcoming ? 'Bidding Opens' : 'Allotment'}
+                                                </span>
+                                                <span className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                                                    {isIpoOpen
+                                                        ? ipo.close_date || 'Closing Soon'
+                                                        : isIpoUpcoming
+                                                        ? ipo.open_date || 'Opening Soon'
+                                                        : ipo.allotment_date || 'Closed'}
+                                                </span>
+                                            </div>
+
+                                            {/* Chevron Arrow */}
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-100 group-hover:bg-emerald-600 group-hover:text-white dark:bg-neutral-800 dark:group-hover:bg-emerald-600 transition-colors">
+                                                <ChevronRight className="h-4 w-4" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </Link>
+                            );
+                        })}
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+                    /* GRID CARDS VIEW */
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                         {ipos.data.map((ipo) => {
                             const isIpoOpen = ipo.status === 'open';
                             const isIpoUpcoming = ipo.status === 'upcoming';
@@ -397,33 +567,33 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                             </div>
                                         </div>
 
-                                    {/* Rates Section */}
-                                    <div className="flex items-center justify-between border-t border-neutral-100 pt-2 dark:border-neutral-800">
-                                        <div>
-                                            <span className="text-[11px] text-neutral-500 block">Offered User Rate</span>
-                                            <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                                                {ipo.active_rate ? `₹${ipo.active_rate.published_rate} / app` : 'Not configured'}
-                                            </span>
-                                        </div>
-                                        {isAdmin && ipo.active_rate && (
-                                            <div className="text-right">
-                                                <span className="text-[11px] text-neutral-500 block">Trader Rate</span>
-                                                <span className="font-medium text-neutral-700 dark:text-neutral-300">
-                                                    ₹{ipo.active_rate.trader_rate} (Margin ₹{ipo.active_rate.margin})
+                                        {/* Rates Section */}
+                                        <div className="flex items-center justify-between border-t border-neutral-100 pt-2 dark:border-neutral-800">
+                                            <div>
+                                                <span className="text-[11px] text-neutral-500 block">Offered User Rate</span>
+                                                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                                    {ipo.active_rate ? `₹${ipo.active_rate.published_rate} / app` : 'Not configured'}
                                                 </span>
                                             </div>
-                                        )}
-                                    </div>
-                                </CardContent>
+                                            {isAdmin && ipo.active_rate && (
+                                                <div className="text-right">
+                                                    <span className="text-[11px] text-neutral-500 block">Trader Rate</span>
+                                                    <span className="font-medium text-neutral-700 dark:text-neutral-300">
+                                                        ₹{ipo.active_rate.trader_rate} (Margin ₹{ipo.active_rate.margin})
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </CardContent>
 
-                                <CardFooter className="pt-2 border-t border-neutral-100 dark:border-neutral-800">
-                                    <Button asChild className="w-full" variant="outline">
-                                        <Link href={`/ipos/${ipo.id}`} prefetch="hover">
-                                            Open Workspace <ChevronRight className="ml-1 h-4 w-4" />
-                                        </Link>
-                                    </Button>
-                                </CardFooter>
-                            </Card>
+                                    <CardFooter className="pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                                        <Button asChild className="w-full" variant="outline">
+                                            <Link href={`/ipos/${ipo.id}`} prefetch="hover">
+                                                Open Workspace <ChevronRight className="ml-1 h-4 w-4" />
+                                            </Link>
+                                        </Button>
+                                    </CardFooter>
+                                </Card>
                             );
                         })}
                     </div>

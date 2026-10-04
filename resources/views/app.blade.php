@@ -30,9 +30,17 @@
             }
         </style>
 
+        <meta name="theme-color" content="#10b981">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="default">
+        <meta name="apple-mobile-web-app-title" content="IPO Hub">
+        <meta name="application-name" content="IPO Applications">
+
+        <link rel="manifest" href="/manifest.json">
         <link rel="icon" href="/favicon.ico" sizes="any">
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link rel="apple-touch-icon" href="/pwa-192x192.png">
 
         @fonts
 
@@ -44,5 +52,16 @@
     </head>
     <body class="font-sans antialiased">
         <x-inertia::app />
+
+        {{-- PWA Service Worker Registration --}}
+        <script>
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                    navigator.serviceWorker.register('/sw.js').catch(function(err) {
+                        console.debug('PWA ServiceWorker registration notice:', err);
+                    });
+                });
+            }
+        </script>
     </body>
 </html>

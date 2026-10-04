@@ -106,8 +106,24 @@ export default function IpoShow({
     userUpis = [],
     isAdmin,
 }: IpoShowProps) {
-    const { auth } = usePage<{ auth: { user: User } }>().props;
-    const [activeTab, setActiveTab] = useState<'overview' | 'applications' | 'rates' | 'funding' | 'exports'>('overview');
+    const getInitialTab = (): 'overview' | 'applications' | 'rates' | 'funding' | 'exports' => {
+        if (typeof window === 'undefined') return 'overview';
+        const param = new URLSearchParams(window.location.search).get('tab');
+        if (param && ['overview', 'applications', 'rates', 'funding', 'exports'].includes(param)) {
+            return param as 'overview' | 'applications' | 'rates' | 'funding' | 'exports';
+        }
+        return 'overview';
+    };
+    const [activeTab, setActiveTabState] = useState<'overview' | 'applications' | 'rates' | 'funding' | 'exports'>(getInitialTab);
+
+    const setActiveTab = (tab: 'overview' | 'applications' | 'rates' | 'funding' | 'exports') => {
+        setActiveTabState(tab);
+        if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.set('tab', tab);
+            window.history.replaceState({}, '', url.toString());
+        }
+    };
 
     // Modals
     const [isRateModalOpen, setIsRateModalOpen] = useState(false);
@@ -687,11 +703,12 @@ export default function IpoShow({
                     </div>
                 )}
 
-                {/* Tabs Navigation */}
-                <div className="flex border-b border-neutral-200 dark:border-neutral-800 space-x-6 text-sm font-medium">
+                {/* Tabs Navigation (Swipeable on mobile) */}
+                <div className="flex border-b border-neutral-200 dark:border-neutral-800 space-x-3 sm:space-x-6 text-xs sm:text-sm font-medium overflow-x-auto no-scrollbar whitespace-nowrap -mx-4 px-4 sm:mx-0 sm:px-0">
                     <button
+                        type="button"
                         onClick={() => setActiveTab('overview')}
-                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors ${
+                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors shrink-0 ${
                             activeTab === 'overview'
                                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold'
                                 : 'border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -701,8 +718,9 @@ export default function IpoShow({
                     </button>
 
                     <button
+                        type="button"
                         onClick={() => setActiveTab('applications')}
-                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors ${
+                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors shrink-0 ${
                             activeTab === 'applications'
                                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold'
                                 : 'border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -712,8 +730,9 @@ export default function IpoShow({
                     </button>
 
                     <button
+                        type="button"
                         onClick={() => setActiveTab('rates')}
-                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors ${
+                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors shrink-0 ${
                             activeTab === 'rates'
                                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold'
                                 : 'border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -724,8 +743,9 @@ export default function IpoShow({
 
                     {isAdmin && (
                         <button
+                            type="button"
                             onClick={() => setActiveTab('funding')}
-                            className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors ${
+                            className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors shrink-0 ${
                                 activeTab === 'funding'
                                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold'
                                 : 'border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -736,8 +756,9 @@ export default function IpoShow({
                     )}
 
                     <button
+                        type="button"
                         onClick={() => setActiveTab('exports')}
-                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors ${
+                        className={`pb-3 border-b-2 flex items-center gap-1.5 transition-colors shrink-0 ${
                             activeTab === 'exports'
                                 ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold'
                                 : 'border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -750,6 +771,23 @@ export default function IpoShow({
                 {/* TAB A: OVERVIEW - Compact, Low-Scroll Bento Layout */}
                 {activeTab === 'overview' && (
                     <div className="space-y-4">
+                        {/* Mobile Quick Action Banner to Applications tab */}
+                        <div className="flex sm:hidden items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/20">
+                            <div className="flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">
+                                    {batches.length} Applications Recorded
+                                </span>
+                            </div>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setActiveTab('applications')}
+                                className="h-7 px-2.5 text-[11px] font-semibold bg-white dark:bg-neutral-900 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800"
+                            >
+                                View Applications &rarr;
+                            </Button>
+                        </div>
                         {/* 1. Above the fold: 4 Compact Key Metric Cards */}
                         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                             {/* Card 1: Price & Minimum Lot */}
