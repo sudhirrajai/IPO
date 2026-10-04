@@ -155,3 +155,88 @@ test('admin can apply in bulk using PAN cards across users with chosen funding s
     expect((float) $batches->sum('expected_user_payout'))->toBe(3400.0)
         ->and((float) $batches->sum('expected_net_earnings'))->toBe(600.0);
 });
+
+test('artisan command splits existing multi-pan batch into separate applications', function () {
+    $user = User::factory()->create(['role' => 'user']);
+    $ipo = Ipo::create([
+        'company_name' => 'Tata Technologies Ltd',
+        'symbol' => 'TATATECH',
+        'exchange' => 'NSE',
+        'lot_size' => 100,
+        'issue_price' => 150,
+        'price_band_max' => 150,
+        'gmp' => 30,
+        'status' => 'bidding_open',
+    ]);
+
+    $pan1 = UserPan::create([
+        'user_id' => $user->id,
+        'pan_number' => 'ABCDE1111A',
+        'account_holder_name' => 'User One',
+        'status' => 'active',
+    ]);
+    $pan2 = UserPan::create([
+        'user_id' => $user->id,
+        'pan_number' => 'BCDEF2222B',
+        'account_holder_name' => 'User Two',
+        'status' => 'active',
+    ]);
+
+    // Create a legacy multi-PAN parent batch with count 2
+    $parentBatch = ApplicationBatch::create([
+        'batch_number' => 'BATCH-OLD-0001',
+        'ipo_id' => $ipo->id,
+        'user_id' => $user->id,
+        'applicant_name' => 'Legacy Bulk',
+        'application_count' => 2,
+        'funding_source' => 'user_money',
+        'profit_sharing_type' => 'fix',
+        'profit_sharing_value' => 500,
+        'ipo_amount' => 30000,
+        'capital_per_application' => 15000,
+        'capital_amount' => 30000,
+        'expected_gross_profit' => 6000,
+        'expected_user_payout' => 1000,
+        'expected_net_earnings' => 5000,
+        'application_status' => 'confirmed',
+        'settlement_status' => 'estimated',
+    ]);
+
+    ApplicationBatchPan::create([
+        'application_batch_id' => $parentBatch->id,
+        'user_pan_id' => $pan1->id,
+        'sequence_number' => 1,
+        'pan_number_snapshot' => $pan1->pan_number,
+        'allotment_status' => 'pending',
+    ]);
+    ApplicationBatchPan::create([
+        'application_batch_id' => $parentBatch->id,
+        'user_pan_id' => $pan2->id,
+        'sequence_number' => 2,
+        'pan_number_snapshot' => $pan2->pan_number,
+        'allotment_status' => 'pending',
+    ]);
+
+    $this->artisan('app:split-multi-pan-batches')
+        ->assertSuccessful();
+
+    // The old parent batch should be deleted
+    expect(ApplicationBatch::find($parentBatch->id))->toBeNull();
+
+    // 2 new individual batches should exist
+    $newBatches = ApplicationBatch::where('ipo_id', $ipo->id)->orderBy('id')->get();
+    expect($newBatches)->toHaveCount(2);
+
+    expect($newBatches[0]->application_count)->toBe(1)
+        ->and($newBatches[0]->pan_number)->toBe('ABCDE1111A')
+        ->and($newBatches[0]->applicant_name)->toBe('User One')
+        ->and((float) $newBatches[0]->expected_user_payout)->toBe(500.0)
+        ->and((float) $newBatches[0]->capital_per_application)->toBe(15000.0);
+
+    expect($newBatches[1]->application_count)->toBe(1)
+        ->and($newBatches[1]->pan_number)->toBe('BCDEF2222B')
+        ->and($newBatches[1]->applicant_name)->toBe('User Two')
+        ->and((float) $newBatches[1]->expected_user_payout)->toBe(500.0)
+        ->and((float) $newBatches[1]->capital_per_application)->toBe(15000.0);
+});
+
