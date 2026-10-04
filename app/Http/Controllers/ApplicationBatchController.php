@@ -142,7 +142,19 @@ class ApplicationBatchController extends Controller
             $validated['user_id'] = $user->id;
         }
 
-        $validated['application_count'] = (int) ($validated['application_count'] ?? 1);
+        if (! empty($validated['pan_ids']) && is_array($validated['pan_ids'])) {
+            $validated['application_count'] = count($validated['pan_ids']);
+            if (empty($validated['applicant_name']) || empty($validated['pan_number'])) {
+                $firstPan = UserPan::find($validated['pan_ids'][0]);
+                if ($firstPan) {
+                    $validated['applicant_name'] = $validated['applicant_name'] ?? $firstPan->account_holder_name;
+                    $validated['pan_number'] = $validated['pan_number'] ?? $firstPan->pan_number;
+                }
+            }
+        } else {
+            $validated['application_count'] = (int) ($validated['application_count'] ?? 1);
+        }
+
         $validated['funding_source'] = $isAdmin
             ? ($validated['funding_source'] ?? 'my_money')
             : 'user_money';

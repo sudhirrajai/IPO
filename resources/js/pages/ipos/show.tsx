@@ -104,9 +104,10 @@ export default function IpoShow({
     userPans,
     bankAccounts = [],
     userUpis = [],
-    isAdmin,
+    isAdmin: isAdminProp,
 }: IpoShowProps) {
     const { auth } = usePage<{ auth: { user: User } }>().props;
+    const isAdmin = auth.user?.role === 'admin';
 
     const getInitialTab = (): 'overview' | 'applications' | 'rates' | 'funding' | 'exports' => {
         if (typeof window === 'undefined') return 'overview';
@@ -177,6 +178,12 @@ export default function IpoShow({
     const [batchNotes, setBatchNotes] = useState('');
     const [batchTraderRef, setBatchTraderRef] = useState('');
 
+    // Bulk apply state
+    const [applyMode, setApplyMode] = useState<'single' | 'bulk'>('single');
+    const [selectedBulkPanIds, setSelectedBulkPanIds] = useState<number[]>([]);
+    const [bulkPanSearchQuery, setBulkPanSearchQuery] = useState('');
+    const [bulkUserFilter, setBulkUserFilter] = useState<string>('all');
+
     const todayIst = getIstToday();
     const hasIpoAllotmentDate = Boolean(ipo.allotment_date);
     const ipoAllotmentDateStr = ipo.allotment_date ? ipo.allotment_date.split('T')[0] : null;
@@ -208,6 +215,39 @@ export default function IpoShow({
         }
         setIsPanDropdownOpen(false);
         setPanSearchQuery('');
+    };
+
+    // Filter userPans for Bulk Apply
+    const filteredBulkPans = userPans.filter((p) => {
+        if (isAdmin && bulkUserFilter !== 'all' && String(p.user_id) !== bulkUserFilter) {
+            return false;
+        }
+        const q = bulkPanSearchQuery.toLowerCase().trim();
+        if (!q) return true;
+        return (
+            p.pan_number?.toLowerCase().includes(q) ||
+            p.masked_pan?.toLowerCase().includes(q) ||
+            p.account_holder_name?.toLowerCase().includes(q) ||
+            p.broker_name?.toLowerCase().includes(q) ||
+            p.notes?.toLowerCase().includes(q) ||
+            p.user?.name?.toLowerCase().includes(q)
+        );
+    });
+
+    const toggleSelectAllBulkPans = () => {
+        const selectableIds = filteredBulkPans.map((p) => p.id);
+        const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedBulkPanIds.includes(id));
+        if (allSelected) {
+            setSelectedBulkPanIds((prev) => prev.filter((id) => !selectableIds.includes(id)));
+        } else {
+            setSelectedBulkPanIds((prev) => Array.from(new Set([...prev, ...selectableIds])));
+        }
+    };
+
+    const toggleBulkPanId = (id: number) => {
+        setSelectedBulkPanIds((prev) =>
+            prev.includes(id) ? prev.filter((pId) => pId !== id) : [...prev, id]
+        );
     };
 
     // Settlement modal state
@@ -427,6 +467,34 @@ export default function IpoShow({
     const handleBatchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const resolvedUpiApp = upiId ? (upiApp !== 'Auto' ? upiApp : detectUpiApp(upiId)) : null;
+
+        if (applyMode === 'bulk') {
+            if (selectedBulkPanIds.length === 0) {
+                alert('Please select at least one saved PAN card for bulk application.');
+                return;
+            }
+            router.post('/applications', {
+                ipo_id: ipo.id,
+                user_id: isAdmin ? (bulkUserFilter !== 'all' ? bulkUserFilter : (batchUserId || auth.user.id)) : auth.user.id,
+                bank_name: bankName || null,
+                upi_id: upiId ? upiId.toLowerCase().trim() : null,
+                upi_app: resolvedUpiApp,
+                profit_sharing_type: profitSharingType,
+                profit_sharing_value: profitSharingValue ? Number(profitSharingValue) : 0,
+                pan_ids: selectedBulkPanIds,
+                funding_source: isAdmin ? batchFunding : 'user_money',
+                notes: batchNotes,
+                trader_reference: batchTraderRef,
+            }, {
+                onSuccess: () => {
+                    setIsBatchModalOpen(false);
+                    setSelectedBulkPanIds([]);
+                    setBatchNotes('');
+                },
+            });
+            return;
+        }
+
         router.post('/applications', {
             ipo_id: ipo.id,
             user_id: isAdmin ? batchUserId : auth.user.id,
@@ -533,11 +601,12 @@ export default function IpoShow({
     const priceBandMax = Number(ipo.price_band_max || ipo.issue_price || 0);
     const currentGmp = Number(ipo.gmp || 0);
     const parsedBatchCount = Math.max(1, Number(batchCount) || 1);
+    const effectiveMultiplier = applyMode === 'bulk' ? selectedBulkPanIds.length : parsedBatchCount;
 
     // Auto-calculated IPO Amount
-    const calculatedIpoAmount = lotSize * priceBandMax * parsedBatchCount;
+    const calculatedIpoAmount = lotSize * priceBandMax * effectiveMultiplier;
     // Expected listing gain based on GMP
-    const calculatedListingGain = lotSize * currentGmp * parsedBatchCount;
+    const calculatedListingGain = lotSize * currentGmp * effectiveMultiplier;
 
     const activePublishedRate = Number(ipo.active_rate?.published_rate || 0);
     const activeTraderRate = Number(ipo.active_rate?.trader_rate || 0);
@@ -546,20 +615,22 @@ export default function IpoShow({
     let previewGrossProfit = 0;
     let previewNetEarnings = 0;
 
-    if (profitSharingType === 'fix') {
-        const val = Number(profitSharingValue) || 0;
-        previewUserPayout = val * parsedBatchCount;
-        previewGrossProfit = calculatedListingGain > 0 ? calculatedListingGain : previewUserPayout;
-        previewNetEarnings = Math.max(0, previewGrossProfit - previewUserPayout);
-    } else if (profitSharingType === 'percentage') {
-        const pct = Number(profitSharingValue) || 0;
-        previewGrossProfit = calculatedListingGain;
-        previewUserPayout = (pct / 100) * previewGrossProfit;
-        previewNetEarnings = previewGrossProfit - previewUserPayout;
-    } else {
-        previewUserPayout = activePublishedRate * parsedBatchCount;
-        previewGrossProfit = activeTraderRate * parsedBatchCount;
-        previewNetEarnings = (activeTraderRate - activePublishedRate) * parsedBatchCount;
+    if (effectiveMultiplier > 0) {
+        if (profitSharingType === 'fix') {
+            const val = Number(profitSharingValue) || 0;
+            previewUserPayout = val * effectiveMultiplier;
+            previewGrossProfit = calculatedListingGain > 0 ? calculatedListingGain : previewUserPayout;
+            previewNetEarnings = Math.max(0, previewGrossProfit - previewUserPayout);
+        } else if (profitSharingType === 'percentage') {
+            const pct = Number(profitSharingValue) || 0;
+            previewGrossProfit = calculatedListingGain;
+            previewUserPayout = (pct / 100) * previewGrossProfit;
+            previewNetEarnings = previewGrossProfit - previewUserPayout;
+        } else {
+            previewUserPayout = activePublishedRate * effectiveMultiplier;
+            previewGrossProfit = activeTraderRate * effectiveMultiplier;
+            previewNetEarnings = (activeTraderRate - activePublishedRate) * effectiveMultiplier;
+        }
     }
     const previewMarginTotal = previewNetEarnings;
 
@@ -2064,24 +2135,244 @@ export default function IpoShow({
                         </DialogDescription>
                     </DialogHeader>
 
+                    {/* Mode Selector: Single Application vs Bulk Apply */}
+                    <div className="flex rounded-lg bg-neutral-100 dark:bg-neutral-800/80 p-1 my-1">
+                        <button
+                            type="button"
+                            onClick={() => setApplyMode('single')}
+                            className={`flex-1 py-1.5 px-3 text-xs font-medium rounded-md transition-all ${
+                                applyMode === 'single'
+                                    ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
+                                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+                            }`}
+                        >
+                            Single Application
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setApplyMode('bulk')}
+                            className={`flex-1 py-1.5 px-3 text-xs font-medium rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                                applyMode === 'bulk'
+                                    ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs font-semibold'
+                                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+                            }`}
+                        >
+                            <Users className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                            <span>Bulk Apply (Saved PANs)</span>
+                            {userPans.length > 0 && (
+                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                                    {userPans.length}
+                                </Badge>
+                            )}
+                        </button>
+                    </div>
+
                     <form onSubmit={handleBatchSubmit} className="space-y-4 pt-1">
-                        {isAdmin && (
-                            <div className="space-y-1">
-                                <Label htmlFor="user_id">Select Friend / User</Label>
-                                <Select value={batchUserId} onValueChange={setBatchUserId}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Choose user..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {usersList.map((u) => (
-                                            <SelectItem key={u.id} value={String(u.id)}>
-                                                {u.name} ({u.email})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                        {applyMode === 'bulk' ? (
+                            <div className="space-y-4">
+                                {isAdmin && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                            <Label htmlFor="bulk_user_filter">Filter PANs by Friend / User</Label>
+                                            <Select value={bulkUserFilter} onValueChange={setBulkUserFilter}>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="All Friends / Users" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="all">All Friends / Saved PANs ({userPans.length})</SelectItem>
+                                                    {usersList.map((u) => {
+                                                        const userPanCount = userPans.filter((p) => String(p.user_id) === String(u.id)).length;
+                                                        return (
+                                                            <SelectItem key={u.id} value={String(u.id)}>
+                                                                {u.name} ({userPanCount} PAN{userPanCount !== 1 ? 's' : ''})
+                                                            </SelectItem>
+                                                        );
+                                                    })}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <Label htmlFor="bulk_funding_source">Funding Capital Source *</Label>
+                                            <Select
+                                                value={batchFunding}
+                                                onValueChange={(val: 'my_money' | 'user_money') => setBatchFunding(val)}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="my_money">My Money (Admin Funds Capital)</SelectItem>
+                                                    <SelectItem value="user_money">User Money (Applicant Funds)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Bulk PAN Selector Box */}
+                                <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 p-3 space-y-2.5">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <Label className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">
+                                                Select Saved PAN Cards *
+                                            </Label>
+                                            <Badge variant={selectedBulkPanIds.length > 0 ? "default" : "outline"} className={`text-[10px] px-1.5 py-0 h-4 ${selectedBulkPanIds.length > 0 ? 'bg-emerald-600 text-white' : ''}`}>
+                                                {selectedBulkPanIds.length} of {filteredBulkPans.length} Selected
+                                            </Badge>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={toggleSelectAllBulkPans}
+                                                className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:underline"
+                                            >
+                                                {filteredBulkPans.length > 0 && filteredBulkPans.every((p) => selectedBulkPanIds.includes(p.id))
+                                                    ? 'Deselect All'
+                                                    : `Select All (${filteredBulkPans.length})`}
+                                            </button>
+                                            {selectedBulkPanIds.length > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedBulkPanIds([])}
+                                                    className="text-[11px] text-neutral-400 hover:text-neutral-600 hover:underline"
+                                                >
+                                                    Clear
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Search input for PAN list */}
+                                    <div className="relative">
+                                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-neutral-400" />
+                                        <Input
+                                            placeholder="Search by name, PAN, broker..."
+                                            value={bulkPanSearchQuery}
+                                            onChange={(e) => setBulkPanSearchQuery(e.target.value)}
+                                            className="h-8 pl-8 text-xs bg-white dark:bg-neutral-900"
+                                        />
+                                    </div>
+
+                                    {/* Scrollable list of selectable PAN cards */}
+                                    <div className="max-h-52 overflow-y-auto space-y-1.5 pr-0.5">
+                                        {filteredBulkPans.length === 0 ? (
+                                            <div className="py-6 px-3 text-center text-xs text-neutral-400 bg-white dark:bg-neutral-900 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-800">
+                                                No saved PAN cards found.
+                                                <div className="mt-1 text-[11px] text-neutral-500">
+                                                    Add PAN cards first from My PANs or switch to Single Application.
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            filteredBulkPans.map((p) => {
+                                                const isSelected = selectedBulkPanIds.includes(p.id);
+                                                return (
+                                                    <div
+                                                        key={p.id}
+                                                        onClick={() => toggleBulkPanId(p.id)}
+                                                        className={`p-2.5 rounded-lg border text-xs cursor-pointer transition flex items-center justify-between ${
+                                                            isSelected
+                                                                ? 'bg-blue-50/70 border-blue-300 dark:bg-blue-950/40 dark:border-blue-700/80 shadow-xs'
+                                                                : 'bg-white dark:bg-neutral-900 border-neutral-200/80 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2.5 min-w-0">
+                                                            <div className={`h-4 w-4 rounded flex items-center justify-center shrink-0 border transition ${
+                                                                isSelected
+                                                                    ? 'bg-blue-600 border-blue-600 text-white'
+                                                                    : 'border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800'
+                                                            }`}>
+                                                                {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
+                                                            </div>
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className="font-mono font-bold text-neutral-900 dark:text-neutral-100">
+                                                                        {isAdmin ? p.pan_number : p.masked_pan}
+                                                                    </span>
+                                                                    {p.broker_name && (
+                                                                        <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 border-neutral-200 text-neutral-500">
+                                                                            {p.broker_name}
+                                                                        </Badge>
+                                                                    )}
+                                                                </div>
+                                                                {p.account_holder_name && (
+                                                                    <span className="text-[11px] text-neutral-500 block truncate">
+                                                                        {p.account_holder_name}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {isAdmin && p.user?.name && (
+                                                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-neutral-300 text-neutral-600 shrink-0">
+                                                                {p.user.name}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Bank Account & UPI ID for Mandate / Payout */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                        <Label htmlFor="bulk_bank_name">Payout / Mandate Bank Account</Label>
+                                        <Select value={bankName} onValueChange={setBankName}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Select primary bank..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {bankAccounts.length === 0 ? (
+                                                    <SelectItem value="none" disabled>
+                                                        No saved banks
+                                                    </SelectItem>
+                                                ) : (
+                                                    bankAccounts.map((b) => (
+                                                        <SelectItem key={b.id} value={b.bank_name}>
+                                                            {b.bank_name} {b.upis && b.upis.length > 0 ? `(${b.upis.length} UPI)` : ''}
+                                                        </SelectItem>
+                                                    ))
+                                                )}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <Label htmlFor="bulk_upi_id">Mandate UPI ID (Optional)</Label>
+                                        <Input
+                                            id="bulk_upi_id"
+                                            placeholder="e.g. name@oksbi"
+                                            value={upiId}
+                                            onChange={(e) => {
+                                                setUpiId(e.target.value);
+                                                setUpiApp(detectUpiApp(e.target.value));
+                                            }}
+                                            className="font-mono text-xs"
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                        )}
+                        ) : (
+                            <div className="space-y-4">
+                                {isAdmin && (
+                                    <div className="space-y-1">
+                                        <Label htmlFor="user_id">Select Friend / User</Label>
+                                        <Select value={batchUserId} onValueChange={setBatchUserId}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Choose user..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {usersList.map((u) => (
+                                                    <SelectItem key={u.id} value={String(u.id)}>
+                                                        {u.name} ({u.email})
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
 
                         {/* Applicant Name & Bank */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2503,9 +2794,11 @@ export default function IpoShow({
                                 </div>
                             )}
                         </div>
+                    </div>
+                )}
 
-                        {/* Profit Sharing Model */}
-                        <div className="space-y-2 border-t border-neutral-100 dark:border-neutral-800 pt-3">
+                {/* Profit Sharing Model */}
+                <div className="space-y-2 border-t border-neutral-100 dark:border-neutral-800 pt-3">
                             <div className="flex items-center justify-between">
                                 <Label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
                                     Profit Sharing Model Decided
@@ -2604,11 +2897,11 @@ export default function IpoShow({
                         <div className="rounded-xl bg-neutral-50 dark:bg-neutral-900/60 p-3.5 border border-neutral-200/80 dark:border-neutral-800 space-y-3">
                             <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 block">
-                                    Live Auto-Calculations (From API)
+                                    Live Auto-Calculations
                                 </span>
                                 <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/60 dark:border-amber-800 flex items-center gap-1">
                                     <Clock className="h-3 w-3" />
-                                    Finalized Listing Day + T+1
+                                    Tentative (Subject to Allotment & Listing)
                                 </span>
                             </div>
 
@@ -2618,12 +2911,18 @@ export default function IpoShow({
                                     <span className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
                                         {formatInr(calculatedIpoAmount)}
                                     </span>
+                                    <span className="text-[10px] text-neutral-400 block mt-0.5">
+                                        {applyMode === 'bulk' ? selectedBulkPanIds.length : parsedBatchCount} lot{(applyMode === 'bulk' ? selectedBulkPanIds.length : parsedBatchCount) !== 1 ? 's' : ''} ({(applyMode === 'bulk' ? selectedBulkPanIds.length : parsedBatchCount) * lotSize} sh)
+                                    </span>
                                 </div>
 
                                 <div className="rounded-lg bg-white dark:bg-neutral-800 p-2.5 border border-neutral-100 dark:border-neutral-700/60">
                                     <span className="text-[11px] text-neutral-400 block">Current GMP</span>
                                     <span className="text-sm font-bold text-emerald-600">
                                         ₹{currentGmp} / sh
+                                    </span>
+                                    <span className="text-[10px] text-neutral-400 block mt-0.5">
+                                        Unofficial grey market rate
                                     </span>
                                 </div>
 
@@ -2632,18 +2931,21 @@ export default function IpoShow({
                                     <span className="text-sm font-bold text-blue-600 dark:text-blue-400">
                                         {formatInr(calculatedListingGain)}
                                     </span>
+                                    <span className="text-[10px] text-neutral-400 block mt-0.5">
+                                        Tentative at current GMP
+                                    </span>
                                 </div>
 
                                 <div className={`rounded-lg bg-white dark:bg-neutral-800 p-2.5 border border-neutral-100 dark:border-neutral-700/60 ${isAdmin ? '' : 'col-span-2 sm:col-span-3 bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800'}`}>
                                     <span className="text-[11px] text-neutral-400 block">
-                                        {isAdmin ? 'Applicant Payout' : 'Your Expected Profit / Payout'}
+                                        {isAdmin ? 'Applicant Payout' : 'Tentative Applicant Payout (Subject to Allotment & Listing)'}
                                     </span>
                                     <span className="text-base sm:text-lg font-bold text-emerald-600 dark:text-emerald-400">
                                         {formatInr(previewUserPayout)}
                                     </span>
                                     {!isAdmin && (
                                         <span className="text-[10px] text-neutral-500 block mt-0.5">
-                                            100% your earnings upon successful allotment
+                                            100% your earnings upon successful allotment & Listing Day + T+1 settlement
                                         </span>
                                     )}
                                 </div>
@@ -2654,6 +2956,9 @@ export default function IpoShow({
                                         <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
                                             {formatInr(previewNetEarnings)}
                                         </span>
+                                        <span className="text-[10px] text-neutral-400 block mt-0.5">
+                                            Admin margin only (hidden from applicant)
+                                        </span>
                                     </div>
                                 )}
                             </div>
@@ -2663,10 +2968,10 @@ export default function IpoShow({
                                 <Clock className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
                                 <div className="space-y-0.5">
                                     <span className="font-semibold block text-amber-950 dark:text-amber-100">
-                                        Profit Finalization & Settlement Timeline
+                                        Tentative Earnings & Settlement Lifecycle
                                     </span>
                                     <span className="text-[10.5px] leading-relaxed text-amber-800 dark:text-amber-300 block">
-                                        All profit numbers shown above are estimated based on current GMP / agreed rate. Final calculations and payouts are settled strictly on <strong>Listing Day + T+1 day</strong> once exchange trading concludes and settlement completes.
+                                        All profit numbers shown above are tentative estimates based on current GMP / agreed rate. Final calculations and payouts are settled strictly on <strong>Listing Day + T+1 day</strong> once exchange trading concludes and allotment is confirmed.
                                     </span>
                                 </div>
                             </div>
@@ -2698,8 +3003,14 @@ export default function IpoShow({
                             <Button type="button" variant="outline" onClick={() => setIsBatchModalOpen(false)}>
                                 Cancel
                             </Button>
-                            <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium">
-                                Submit Application
+                            <Button
+                                type="submit"
+                                disabled={applyMode === 'bulk' && selectedBulkPanIds.length === 0}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                            >
+                                {applyMode === 'bulk'
+                                    ? `Submit Bulk Applications (${selectedBulkPanIds.length} Lots)`
+                                    : (isAdmin ? 'Record Application' : 'Submit Application')}
                             </Button>
                         </DialogFooter>
                     </form>
