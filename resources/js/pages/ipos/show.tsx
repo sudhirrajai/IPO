@@ -106,6 +106,8 @@ export default function IpoShow({
     userUpis = [],
     isAdmin,
 }: IpoShowProps) {
+    const { auth } = usePage<{ auth: { user: User } }>().props;
+
     const getInitialTab = (): 'overview' | 'applications' | 'rates' | 'funding' | 'exports' => {
         if (typeof window === 'undefined') return 'overview';
         const param = new URLSearchParams(window.location.search).get('tab');
