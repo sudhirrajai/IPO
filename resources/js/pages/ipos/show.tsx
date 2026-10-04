@@ -338,6 +338,10 @@ export default function IpoShow({
         router.post(`/applications/${batchId}/reject`, {}, { preserveScroll: true });
     };
 
+    const handleApproveAll = () => {
+        router.post(`/ipos/${ipo.id}/applications/approve-all`, {}, { preserveScroll: true });
+    };
+
     const breadcrumbs: BreadcrumbItem[] = [
         {
             title: 'IPOs',
@@ -1252,81 +1256,139 @@ export default function IpoShow({
                 )}
 
                 {/* TAB B: APPLICATIONS */}
-                {activeTab === 'applications' && (
-                    <Card>
-                        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3">
-                            <div>
-                                <CardTitle className="text-base font-semibold">IPO Applications & Tracking</CardTitle>
-                                <CardDescription>Applications filled with dynamic profit sharing, bank accounts, and 1-click allotment actions</CardDescription>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setIsBankModalOpen(true)}
-                                    className="text-xs"
-                                >
-                                    <Landmark className="mr-1.5 h-3.5 w-3.5 text-neutral-500" />
-                                    Bank Accounts ({bankAccounts.length})
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    onClick={() => setIsBatchModalOpen(true)}
-                                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
-                                >
-                                    <Plus className="mr-1.5 h-3.5 w-3.5" /> + Fill Application
-                                </Button>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {batches.length === 0 ? (
-                                <div className="py-12 text-center space-y-3">
-                                    <p className="text-sm text-neutral-500">
-                                        No applications recorded for {ipo.company_name} yet.
-                                    </p>
+                {activeTab === 'applications' && (() => {
+                    const pendingBatchesCount = batches.filter(
+                        (b) => b.application_status === 'pending_approval' || b.application_status === 'submitted'
+                    ).length;
+
+                    return (
+                        <Card>
+                            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3">
+                                <div>
+                                    <CardTitle className="text-base font-semibold">IPO Applications & Tracking</CardTitle>
+                                    <CardDescription>Applications filled with dynamic profit sharing, bank accounts, and 1-click allotment actions</CardDescription>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {/* CSV Export Option 1: User Rates CSV */}
+                                    <a
+                                        href={`/ipos/${ipo.id}/export/user-csv`}
+                                        download
+                                        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 shadow-2xs transition-colors"
+                                        title="Export CSV with Serial No, PAN Holder, PAN, and User Applied Rate"
+                                    >
+                                        <Download className="h-3.5 w-3.5 text-blue-600" />
+                                        User Rates CSV
+                                    </a>
+
+                                    {/* CSV Export Option 2: Trader Rates CSV (Admin only) */}
+                                    {isAdmin && (
+                                        <a
+                                            href={`/ipos/${ipo.id}/export/trader-csv`}
+                                            download
+                                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-purple-300 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-950/40 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 shadow-2xs transition-colors"
+                                            title="Export CSV with Serial No, PAN Holder, PAN, and Trader Rate"
+                                        >
+                                            <FileSpreadsheet className="h-3.5 w-3.5 text-purple-600" />
+                                            Trader Rates CSV
+                                        </a>
+                                    )}
+
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setIsBankModalOpen(true)}
+                                        className="text-xs h-8"
+                                    >
+                                        <Landmark className="mr-1.5 h-3.5 w-3.5 text-neutral-500" />
+                                        Bank Accounts ({bankAccounts.length})
+                                    </Button>
                                     <Button
                                         size="sm"
                                         onClick={() => setIsBatchModalOpen(true)}
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8"
                                     >
-                                        <Plus className="mr-1.5 h-4 w-4" /> Fill First Application
+                                        <Plus className="mr-1.5 h-3.5 w-3.5" /> + Fill Application
                                     </Button>
                                 </div>
-                            ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left text-sm">
-                                        <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800">
-                                            <tr>
-                                                <th className="py-3 px-3">Applicant & Batch</th>
-                                                <th className="py-3 px-3">Bank</th>
-                                                <th className="py-3 px-3">PAN & UPI</th>
-                                                <th className="py-3 px-3">IPO Amount</th>
-                                                <th className="py-3 px-3">Current GMP</th>
-                                                <th className="py-3 px-3">Profit Sharing</th>
-                                                <th className="py-3 px-3">Est. Payout / Net</th>
-                                                <th className="py-3 px-3">Status</th>
-                                                <th className="py-3 px-3 text-right">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                                            {batches.map((batch) => {
-                                                const pans = batch.batch_pans || [];
-                                                const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
-                                                const panDisplay = panNumberRaw
-                                                    ? (isAdmin ? panNumberRaw : `XXXXXX${panNumberRaw.slice(-4)}`)
-                                                    : 'No PAN';
+                            </CardHeader>
+                            <CardContent>
+                                {/* Pending Approval Alert Banner for Admin */}
+                                {pendingBatchesCount > 0 && isAdmin && (
+                                    <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50/90 p-4 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white shadow">
+                                                <Clock className="h-5 w-5 animate-pulse" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                                                    {pendingBatchesCount} Application{pendingBatchesCount > 1 ? 's' : ''} Awaiting Approval
+                                                    <Badge className="bg-amber-600 text-white font-bold text-[10px]">
+                                                        Auto-Approve: OFF
+                                                    </Badge>
+                                                </h3>
+                                                <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                                                    Auto-approval is turned OFF. Review each applicant below or approve all with 1-click.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            size="sm"
+                                            onClick={handleApproveAll}
+                                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs shrink-0"
+                                        >
+                                            <Check className="mr-1.5 h-3.5 w-3.5" /> Approve All ({pendingBatchesCount})
+                                        </Button>
+                                    </div>
+                                )}
 
-                                                const locallyChecked = checkedBatchIds[batch.id];
-                                                const hasAutoCheckResult = Boolean(
-                                                    batch.allotment_details ||
-                                                    batch.allotment_checked_at ||
-                                                    locallyChecked
-                                                );
+                                {batches.length === 0 ? (
+                                    <div className="py-12 text-center space-y-3">
+                                        <p className="text-sm text-neutral-500">
+                                            No applications recorded for {ipo.company_name} yet.
+                                        </p>
+                                        <Button
+                                            size="sm"
+                                            onClick={() => setIsBatchModalOpen(true)}
+                                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                                        >
+                                            <Plus className="mr-1.5 h-4 w-4" /> Fill First Application
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800">
+                                                <tr>
+                                                    <th className="py-3 px-3">Applicant & Batch</th>
+                                                    <th className="py-3 px-3">Bank</th>
+                                                    <th className="py-3 px-3">PAN & UPI</th>
+                                                    <th className="py-3 px-3">IPO Amount</th>
+                                                    <th className="py-3 px-3">Current GMP</th>
+                                                    <th className="py-3 px-3">Profit Sharing</th>
+                                                    <th className="py-3 px-3">Est. Payout / Net</th>
+                                                    <th className="py-3 px-3">Status</th>
+                                                    <th className="py-3 px-3 text-right">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                                                {batches.map((batch) => {
+                                                    const pans = batch.batch_pans || [];
+                                                    const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
+                                                    const panDisplay = panNumberRaw
+                                                        ? (isAdmin ? panNumberRaw : `XXXXXX${panNumberRaw.slice(-4)}`)
+                                                        : 'No PAN';
 
-                                                const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (batch.allotment_details?.allotted || locallyChecked?.allotted));
-                                                const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!batch.allotment_details?.allotted && !locallyChecked?.allotted));
-                                                const isPendingApproval = batch.application_status === 'pending_approval';
-                                                const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval && !hasAutoCheckResult;
+                                                    const locallyChecked = checkedBatchIds[batch.id];
+                                                    const hasAutoCheckResult = Boolean(
+                                                        batch.allotment_details ||
+                                                        batch.allotment_checked_at ||
+                                                        locallyChecked
+                                                    );
+
+                                                    const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (batch.allotment_details?.allotted || locallyChecked?.allotted));
+                                                    const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!batch.allotment_details?.allotted && !locallyChecked?.allotted));
+                                                    const isPendingApproval = batch.application_status === 'pending_approval' || batch.application_status === 'submitted';
+                                                    const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval && !hasAutoCheckResult;
 
                                                 const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
@@ -1636,7 +1698,8 @@ export default function IpoShow({
                             )}
                         </CardContent>
                     </Card>
-                )}
+                );
+            })()}
 
                 {/* TAB C: RATES & HISTORY */}
                 {activeTab === 'rates' && (

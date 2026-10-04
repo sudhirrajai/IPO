@@ -251,6 +251,24 @@ class ApplicationBatchController extends Controller
         return back()->with('success', "Application {$batch->batch_number} approved successfully.");
     }
 
+    public function approveAll(Request $request, \App\Models\Ipo $ipo): RedirectResponse
+    {
+        if (! $request->user()->isAdmin()) {
+            abort(403, 'Only admins can approve applications.');
+        }
+
+        $count = ApplicationBatch::where('ipo_id', $ipo->id)
+            ->whereIn('application_status', ['pending_approval', 'submitted'])
+            ->update(['application_status' => 'confirmed']);
+
+        AuditService::log('batches_bulk_approved', $ipo, null, [
+            'approved_count' => $count,
+            'approved_by' => $request->user()->name,
+        ], "Approved all {$count} pending application(s) for {$ipo->company_name}");
+
+        return back()->with('success', "Approved all {$count} pending application(s) successfully.");
+    }
+
     public function reject(Request $request, ApplicationBatch $batch): RedirectResponse
     {
         if (! $request->user()->isAdmin()) {

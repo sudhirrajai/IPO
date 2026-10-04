@@ -212,7 +212,7 @@ class ApplicationBatchService
                 'expected_gross_profit' => $grossProfit,
                 'expected_user_payout' => $userPayout,
                 'expected_net_earnings' => $netEarnings,
-                'application_status' => $data['application_status'] ?? (($profitSharingType === 'fix' && ! ($ipo->auto_approve_fix ?? true) && ! Auth::user()?->isAdmin()) ? 'pending_approval' : 'confirmed'),
+                'application_status' => $data['application_status'] ?? ((! ($ipo->auto_approve_fix ?? true) && ! Auth::user()?->isAdmin()) ? 'pending_approval' : 'confirmed'),
                 'settlement_status' => 'estimated',
                 'trader_reference' => $data['trader_reference'] ?? null,
                 'submission_date' => $data['submission_date'] ?? now()->format('Y-m-d'),

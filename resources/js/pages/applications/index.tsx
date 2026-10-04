@@ -5,7 +5,9 @@ import {
     CheckCheck,
     CheckCircle2,
     ChevronDown,
+    Clock,
     Copy,
+    Download,
     Edit3,
     FileSpreadsheet,
     FileText,
@@ -124,6 +126,23 @@ export default function ApplicationsIndex({
     // Today date check in Indian Standard Time (Asia/Kolkata)
     const todayIst = getIstToday();
     const todayAllotmentIpos = ipos.filter((ipo) => ipo.allotment_date?.split('T')[0] === todayIst);
+
+    const pendingBatchesCount = batches.data.filter(
+        (b) => b.application_status === 'pending_approval' || b.application_status === 'submitted'
+    ).length;
+
+    const handleApproveAllPending = () => {
+        if (selectedIpo !== 'all') {
+            router.post(`/ipos/${selectedIpo}/applications/approve-all`, {}, { preserveScroll: true });
+        } else {
+            const pendingIds = batches.data
+                .filter((b) => b.application_status === 'pending_approval' || b.application_status === 'submitted')
+                .map((b) => b.id);
+            pendingIds.forEach((id) => {
+                router.post(`/applications/${id}/approve`, {}, { preserveScroll: true });
+            });
+        }
+    };
 
     const copyPan = (pan: string) => {
         navigator.clipboard.writeText(pan);
@@ -379,7 +398,31 @@ export default function ApplicationsIndex({
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {/* CSV Export Option 1: User Rates CSV */}
+                        <a
+                            href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/user-csv` : '/applications/export/user-csv'}
+                            download
+                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 shadow-2xs transition-colors"
+                            title="Export CSV with Serial No, PAN Holder, PAN, and User Applied Rate"
+                        >
+                            <Download className="h-3.5 w-3.5 text-blue-600" />
+                            User Rates CSV
+                        </a>
+
+                        {/* CSV Export Option 2: Trader Rates CSV (Admin only) */}
+                        {isAdmin && (
+                            <a
+                                href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/trader-csv` : '/applications/export/trader-csv'}
+                                download
+                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-purple-300 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-950/40 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 shadow-2xs transition-colors"
+                                title="Export CSV with Serial No, PAN Holder, PAN, and Trader Rate"
+                            >
+                                <FileSpreadsheet className="h-3.5 w-3.5 text-purple-600" />
+                                Trader Rates CSV
+                            </a>
+                        )}
+
                         <Button asChild className="bg-emerald-600 hover:bg-emerald-700 text-white">
                             <Link href="/ipos">
                                 <Plus className="mr-2 h-4 w-4" />
@@ -388,6 +431,37 @@ export default function ApplicationsIndex({
                         </Button>
                     </div>
                 </div>
+
+                {/* Pending Approvals Banner for Admin */}
+                {pendingBatchesCount > 0 && isAdmin && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50/90 p-4 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white shadow">
+                                    <Clock className="h-5 w-5 animate-pulse" />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                                        {pendingBatchesCount} Application{pendingBatchesCount > 1 ? 's' : ''} Awaiting Approval
+                                        <Badge className="bg-amber-600 text-white font-bold text-[10px]">
+                                            Auto-Approve: OFF
+                                        </Badge>
+                                    </h3>
+                                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                                        Review applicant details and manually approve applications below to confirm them for bidding.
+                                    </p>
+                                </div>
+                            </div>
+                            <Button
+                                size="sm"
+                                onClick={handleApproveAllPending}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs shrink-0"
+                            >
+                                <Check className="mr-1.5 h-3.5 w-3.5" /> Approve All Pending ({pendingBatchesCount})
+                            </Button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Allotment Day Notification Banner */}
                 {(todayAllotmentIpos.length > 0 || allotmentTodayCount > 0) && (
@@ -608,7 +682,7 @@ export default function ApplicationsIndex({
 
                                             const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (batch.allotment_details?.allotted || locallyChecked?.allotted));
                                             const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!batch.allotment_details?.allotted && !locallyChecked?.allotted));
-                                            const isPendingApproval = batch.application_status === 'pending_approval';
+                                            const isPendingApproval = batch.application_status === 'pending_approval' || batch.application_status === 'submitted';
                                             const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval && !hasAutoCheckResult;
                                             const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
