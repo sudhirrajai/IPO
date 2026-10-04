@@ -106,6 +106,7 @@ export default function ApplicationsIndex({
     const [allotmentLoading, setAllotmentLoading] = useState(false);
     const [allotmentResult, setAllotmentResult] = useState<AllotmentResultData | null>(null);
     const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
+    const [checkedBatchIds, setCheckedBatchIds] = useState<Record<number, { allotted: boolean; details: any }>>({});
 
     // PAN attach / update modal
     const [panModalBatch, setPanModalBatch] = useState<ApplicationBatch | null>(null);
@@ -203,7 +204,18 @@ export default function ApplicationsIndex({
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
                 pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
             });
-            router.reload({ only: ['batches'] });
+
+            if (data.success && data.found) {
+                setCheckedBatchIds(prev => ({
+                    ...prev,
+                    [batch.id]: {
+                        allotted: Boolean(data.allotted),
+                        details: data,
+                    },
+                }));
+            }
+
+            router.reload({ preserveScroll: true });
         } catch (err: any) {
             setAllotmentResult({
                 success: false,
@@ -587,10 +599,17 @@ export default function ApplicationsIndex({
                                                 ? (isAdmin ? panNumberRaw : `XXXXXX${panNumberRaw.slice(-4)}`)
                                                 : null;
 
-                                            const isAllotted = batch.application_status === 'allotted';
-                                            const isNotAllotted = batch.application_status === 'not_allotted';
+                                            const locallyChecked = checkedBatchIds[batch.id];
+                                            const hasAutoCheckResult = Boolean(
+                                                batch.allotment_details ||
+                                                batch.allotment_checked_at ||
+                                                locallyChecked
+                                            );
+
+                                            const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (batch.allotment_details?.allotted || locallyChecked?.allotted));
+                                            const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!batch.allotment_details?.allotted && !locallyChecked?.allotted));
                                             const isPendingApproval = batch.application_status === 'pending_approval';
-                                            const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval;
+                                            const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval && !hasAutoCheckResult;
                                             const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
                                             const hasAllotmentDate = Boolean(batch.ipo?.allotment_date);
@@ -846,14 +865,14 @@ export default function ApplicationsIndex({
                                                             )}
 
                                                             {isAllotted && (
-                                                                <span className="text-xs text-emerald-600 font-medium inline-flex items-center">
-                                                                    <CheckCircle2 className="h-4 w-4 mr-1" /> Settled
+                                                                <span className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold inline-flex items-center bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800">
+                                                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Allotted
                                                                 </span>
                                                             )}
 
                                                             {isNotAllotted && (
-                                                                <span className="text-xs text-neutral-500 font-medium">
-                                                                    Refunded
+                                                                <span className="text-xs text-rose-700 dark:text-rose-300 font-semibold inline-flex items-center bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded border border-rose-300 dark:border-rose-800">
+                                                                    <X className="h-3.5 w-3.5 mr-1 text-rose-600" /> Not Allotted
                                                                 </span>
                                                             )}
 
