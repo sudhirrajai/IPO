@@ -82,7 +82,7 @@ class ApplicationBatch extends Model
 
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class)->withTrashed();
     }
 
     public function rate(): BelongsTo
@@ -107,7 +107,7 @@ class ApplicationBatch extends Model
 
     public function creator(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'created_by_user_id');
+        return $this->belongsTo(User::class, 'created_by_user_id')->withTrashed();
     }
 
     public function isMyMoney(): bool

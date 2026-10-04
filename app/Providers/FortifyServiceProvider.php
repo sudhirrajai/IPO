@@ -41,6 +41,20 @@ class FortifyServiceProvider extends ServiceProvider
     {
         Fortify::resetUserPasswordsUsing(ResetUserPassword::class);
         Fortify::createUsersUsing(CreateNewUser::class);
+
+        Fortify::authenticateUsing(function (Request $request) {
+            $user = \App\Models\User::where('email', $request->email)->first();
+
+            if ($user && \Illuminate\Support\Facades\Hash::check($request->password, $user->password)) {
+                if ($user->status !== 'active') {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        Fortify::username() => ['This account has been deactivated or archived. Please contact the administrator.'],
+                    ]);
+                }
+                return $user;
+            }
+            return null;
+        });
     }
 
     /**

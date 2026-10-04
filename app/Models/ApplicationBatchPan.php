@@ -32,6 +32,6 @@ class ApplicationBatchPan extends Model
 
     public function userPan(): BelongsTo
     {
-        return $this->belongsTo(UserPan::class, 'user_pan_id');
+        return $this->belongsTo(UserPan::class, 'user_pan_id')->withTrashed();
     }
 }

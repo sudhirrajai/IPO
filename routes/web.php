@@ -45,8 +45,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // PAN Registry
     Route::get('/pans', [UserPanController::class, 'index'])->name('pans.index');
     Route::post('/pans', [UserPanController::class, 'store'])->name('pans.store');
+    Route::put('/pans/{pan}', [UserPanController::class, 'update'])->name('pans.update');
+    Route::delete('/pans/{pan}', [UserPanController::class, 'destroy'])->name('pans.destroy');
     Route::post('/pans/{pan}/reveal', [UserPanController::class, 'reveal'])->name('pans.reveal');
-    Route::post('/pans/{pan}/toggle', [UserPanController::class, 'destroy'])->name('pans.toggle');
+    Route::post('/pans/{pan}/toggle', [UserPanController::class, 'toggle'])->name('pans.toggle');
 
     // Bank Accounts (Quick Add / Manage)
     Route::post('/bank-accounts', [\App\Http\Controllers\BankAccountController::class, 'store'])->name('bank-accounts.store');
@@ -92,6 +94,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/users', [UserController::class, 'index'])->name('users.index');
         Route::post('/users', [UserController::class, 'store'])->name('users.store');
         Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
+        Route::post('/users/{user}/toggle', [UserController::class, 'toggleStatus'])->name('users.toggle');
+        Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+        Route::post('/users/{id}/restore', [UserController::class, 'restore'])->name('users.restore');
 
         // Audit Logs
         Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit.index');

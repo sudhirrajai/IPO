@@ -40,6 +40,6 @@ class Settlement extends Model
 
     public function settledBy(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'settled_by_user_id');
+        return $this->belongsTo(User::class, 'settled_by_user_id')->withTrashed();
     }
 }

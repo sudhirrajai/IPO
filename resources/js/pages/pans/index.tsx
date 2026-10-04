@@ -1,14 +1,18 @@
 import { Head, router, usePage } from '@inertiajs/react';
 import {
+    AlertTriangle,
     CheckCircle2,
     Copy,
     CreditCard,
+    Edit2,
     Eye,
     EyeOff,
     Filter,
     Plus,
     Search,
+    ShieldAlert,
     ShieldCheck,
+    Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -61,11 +65,16 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
 
     const [search, setSearch] = useState(filters.search || '');
     const [selectedUser, setSelectedUser] = useState(filters.user_id || 'all');
+
+    // Modals
     const [isAddOpen, setIsAddOpen] = useState(false);
+    const [editingPan, setEditingPan] = useState<UserPan | null>(null);
+    const [deletingPan, setDeletingPan] = useState<UserPan | null>(null);
 
     // Revealed PAN numbers cache { panId: fullPanString }
     const [revealedPans, setRevealedPans] = useState<Record<number, string>>({});
     const [revealingId, setRevealingId] = useState<number | null>(null);
+    const [copiedId, setCopiedId] = useState<number | null>(null);
 
     // Add PAN form
     const [newPanUserId, setNewPanUserId] = useState(isAdmin ? (users[0]?.id ? String(users[0].id) : '') : String(auth.user.id));
@@ -73,7 +82,14 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
     const [newHolderName, setNewHolderName] = useState('');
     const [newBrokerName, setNewBrokerName] = useState('');
     const [newNotes, setNewNotes] = useState('');
-    const [copiedId, setCopiedId] = useState<number | null>(null);
+
+    // Edit PAN form
+    const [editUserId, setEditUserId] = useState('');
+    const [editPanNumber, setEditPanNumber] = useState('');
+    const [editHolderName, setEditHolderName] = useState('');
+    const [editBrokerName, setEditBrokerName] = useState('');
+    const [editNotes, setEditNotes] = useState('');
+    const [editStatus, setEditStatus] = useState<'active' | 'inactive'>('active');
 
     const handleFilterChange = (key: string, value: string) => {
         const query: Record<string, string> = {
@@ -90,7 +106,6 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
 
     const handleReveal = async (pan: UserPan) => {
         if (revealedPans[pan.id]) {
-            // Hide it again
             const copy = { ...revealedPans };
             delete copy[pan.id];
             setRevealedPans(copy);
@@ -143,8 +158,72 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
         });
     };
 
+    const handleOpenEdit = async (pan: UserPan) => {
+        setEditingPan(pan);
+        setEditUserId(String(pan.user_id));
+        setEditHolderName(pan.account_holder_name || '');
+        setEditBrokerName(pan.broker_name || '');
+        setEditNotes(pan.notes || '');
+        setEditStatus(pan.status);
+
+        // Fetch full PAN if not already revealed
+        if (revealedPans[pan.id]) {
+            setEditPanNumber(revealedPans[pan.id]);
+        } else {
+            try {
+                const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || '';
+                const res = await fetch(`/pans/${pan.id}/reveal`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                        Accept: 'application/json',
+                    },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setEditPanNumber(data.pan_number);
+                    setRevealedPans((prev) => ({ ...prev, [pan.id]: data.pan_number }));
+                } else {
+                    setEditPanNumber(pan.pan_number || '');
+                }
+            } catch {
+                setEditPanNumber(pan.pan_number || '');
+            }
+        }
+    };
+
+    const handleUpdatePan = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingPan) return;
+
+        router.put(`/pans/${editingPan.id}`, {
+            user_id: isAdmin ? editUserId : editingPan.user_id,
+            pan_number: editPanNumber.toUpperCase().trim(),
+            account_holder_name: editHolderName,
+            broker_name: editBrokerName,
+            notes: editNotes,
+            status: editStatus,
+        }, {
+            onSuccess: () => {
+                setEditingPan(null);
+            },
+        });
+    };
+
     const handleToggleStatus = (pan: UserPan) => {
-        router.post(`/pans/${pan.id}/toggle`);
+        router.post(`/pans/${pan.id}/toggle`, {}, { preserveScroll: true });
+    };
+
+    const handleConfirmDelete = () => {
+        if (!deletingPan) return;
+
+        router.delete(`/pans/${deletingPan.id}`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setDeletingPan(null);
+            },
+        });
     };
 
     return (
@@ -159,7 +238,7 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                             PAN Registry & Management
                         </h1>
                         <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                            Securely save and reuse PAN cards for high-speed IPO batch submissions.
+                            Save, edit, and organize investor PAN cards with safe data preservation for IPO bids.
                         </p>
                     </div>
 
@@ -222,91 +301,120 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                             const displayedPan = isRevealed ? revealedPans[pan.id] : pan.masked_pan;
 
                             return (
-                                <Card key={pan.id} className="relative overflow-hidden">
-                                    <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
-                                    <CardHeader className="pb-2">
-                                        <div className="flex items-start justify-between">
-                                            <div>
-                                                <span className="text-xs text-neutral-500 block">PAN Card</span>
-                                                <div className="flex items-center gap-2 mt-0.5">
-                                                    <span className="font-mono text-lg font-bold tracking-wider text-neutral-900 dark:text-neutral-50">
-                                                        {displayedPan}
-                                                    </span>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-7 w-7 text-neutral-500 hover:text-neutral-900"
-                                                        onClick={() => handleReveal(pan)}
-                                                        disabled={revealingId === pan.id}
-                                                        title={isRevealed ? 'Hide PAN' : 'Reveal full PAN'}
-                                                    >
-                                                        {isRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                                    </Button>
-                                                    {isRevealed && (
+                                <Card key={pan.id} className="relative overflow-hidden flex flex-col justify-between">
+                                    <div className={`absolute top-0 left-0 right-0 h-1 ${pan.status === 'active' ? 'bg-emerald-500' : 'bg-neutral-400'}`} />
+                                    <div>
+                                        <CardHeader className="pb-2">
+                                            <div className="flex items-start justify-between">
+                                                <div>
+                                                    <span className="text-xs text-neutral-500 block">PAN Card</span>
+                                                    <div className="flex items-center gap-2 mt-0.5">
+                                                        <span className="font-mono text-lg font-bold tracking-wider text-neutral-900 dark:text-neutral-50">
+                                                            {displayedPan}
+                                                        </span>
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"
-                                                            className="h-7 w-7 text-neutral-500 hover:text-neutral-900"
-                                                            onClick={() => handleCopy(pan.id, revealedPans[pan.id])}
-                                                            title="Copy PAN"
+                                                            className="h-7 w-7 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+                                                            onClick={() => handleReveal(pan)}
+                                                            disabled={revealingId === pan.id}
+                                                            title={isRevealed ? 'Hide PAN' : 'Reveal full PAN'}
                                                         >
-                                                            {copiedId === pan.id ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                                                            {isRevealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                                         </Button>
-                                                    )}
+                                                        {isRevealed && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-7 w-7 text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+                                                                onClick={() => handleCopy(pan.id, revealedPans[pan.id])}
+                                                                title="Copy PAN"
+                                                            >
+                                                                {copiedId === pan.id ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                                                            </Button>
+                                                        )}
+                                                    </div>
                                                 </div>
+
+                                                <Badge
+                                                    variant={pan.status === 'active' ? 'default' : 'secondary'}
+                                                    className="text-[10px] capitalize"
+                                                >
+                                                    {pan.status}
+                                                </Badge>
                                             </div>
+                                        </CardHeader>
 
-                                            <Badge
-                                                variant={pan.status === 'active' ? 'default' : 'secondary'}
-                                                className="text-[10px] capitalize"
-                                            >
-                                                {pan.status}
-                                            </Badge>
-                                        </div>
-                                    </CardHeader>
-
-                                    <CardContent className="space-y-2 text-xs">
-                                        <div>
-                                            <span className="text-neutral-500 block">Holder Name</span>
-                                            <span className="font-medium text-neutral-800 dark:text-neutral-200">
-                                                {pan.account_holder_name || 'N/A'}
-                                            </span>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-100 dark:border-neutral-800">
+                                        <CardContent className="space-y-2 text-xs">
                                             <div>
-                                                <span className="text-neutral-500 block">Broker / Demat</span>
+                                                <span className="text-neutral-500 block">Holder Name</span>
                                                 <span className="font-medium text-neutral-800 dark:text-neutral-200">
-                                                    {pan.broker_name || 'Generic'}
+                                                    {pan.account_holder_name || 'N/A'}
                                                 </span>
                                             </div>
-                                            {isAdmin && pan.user && (
+
+                                            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-100 dark:border-neutral-800">
                                                 <div>
-                                                    <span className="text-neutral-500 block">Owner</span>
+                                                    <span className="text-neutral-500 block">Broker / Demat</span>
                                                     <span className="font-medium text-neutral-800 dark:text-neutral-200">
-                                                        {pan.user.name}
+                                                        {pan.broker_name || 'Generic'}
                                                     </span>
                                                 </div>
+                                                {isAdmin && pan.user && (
+                                                    <div>
+                                                        <span className="text-neutral-500 block">Owner</span>
+                                                        <span className="font-medium text-neutral-800 dark:text-neutral-200">
+                                                            {pan.user.name}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {pan.notes && (
+                                                <p className="text-neutral-500 italic pt-1 text-[11px]">
+                                                    "{pan.notes}"
+                                                </p>
                                             )}
-                                        </div>
+                                        </CardContent>
+                                    </div>
 
-                                        {pan.notes && (
-                                            <p className="text-neutral-500 italic pt-1 text-[11px]">
-                                                "{pan.notes}"
-                                            </p>
-                                        )}
+                                    {/* Action Buttons: Toggle, Edit, Delete */}
+                                    <div className="p-3 pt-0 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between mt-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={`h-7 text-xs ${
+                                                pan.status === 'active'
+                                                    ? 'text-neutral-500 hover:text-amber-600'
+                                                    : 'text-emerald-600 hover:text-emerald-700'
+                                            }`}
+                                            onClick={() => handleToggleStatus(pan)}
+                                        >
+                                            {pan.status === 'active' ? 'Deactivate' : 'Activate'}
+                                        </Button>
 
-                                        <div className="pt-2 flex justify-end">
+                                        <div className="flex items-center gap-1">
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                className="h-6 text-[11px] text-neutral-400 hover:text-neutral-700"
-                                                onClick={() => handleToggleStatus(pan)}
+                                                className="h-7 text-xs text-neutral-700 hover:text-neutral-900 dark:text-neutral-300"
+                                                onClick={() => handleOpenEdit(pan)}
+                                                title="Edit PAN details"
                                             >
-                                                {pan.status === 'active' ? 'Deactivate' : 'Activate'}
+                                                <Edit2 className="h-3.5 w-3.5 mr-1" /> Edit
+                                            </Button>
+
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                                onClick={() => setDeletingPan(pan)}
+                                                title="Delete PAN"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
                                             </Button>
                                         </div>
-                                    </CardContent>
+                                    </div>
                                 </Card>
                             );
                         })}
@@ -396,6 +504,144 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* Edit PAN Modal */}
+            <Dialog open={!!editingPan} onOpenChange={() => setEditingPan(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Edit Saved PAN</DialogTitle>
+                        <DialogDescription>
+                            Update PAN holder details, linked demat broker, or active status.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form onSubmit={handleUpdatePan} className="space-y-4">
+                        {isAdmin && (
+                            <div className="space-y-1">
+                                <Label htmlFor="edit_pan_user">Assigned User Account *</Label>
+                                <Select value={editUserId} onValueChange={setEditUserId}>
+                                    <SelectTrigger id="edit_pan_user">
+                                        <SelectValue placeholder="Select user..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {users.map((u) => (
+                                            <SelectItem key={u.id} value={String(u.id)}>
+                                                {u.name} ({u.email})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+
+                        <div className="space-y-1">
+                            <Label htmlFor="edit_pan_number">PAN Number *</Label>
+                            <Input
+                                id="edit_pan_number"
+                                required
+                                maxLength={10}
+                                placeholder="ABCDE1234F"
+                                className="font-mono uppercase tracking-wider"
+                                value={editPanNumber}
+                                onChange={(e) => setEditPanNumber(e.target.value.toUpperCase())}
+                            />
+                            <span className="text-[11px] text-neutral-500">Format: 5 letters, 4 digits, 1 letter</span>
+                        </div>
+
+                        <div className="space-y-1">
+                            <Label htmlFor="edit_pan_holder">Account Holder Name</Label>
+                            <Input
+                                id="edit_pan_holder"
+                                placeholder="Name as on PAN card"
+                                value={editHolderName}
+                                onChange={(e) => setEditHolderName(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="edit_pan_broker">Broker / Demat</Label>
+                                <Input
+                                    id="edit_pan_broker"
+                                    placeholder="e.g. Zerodha, Groww"
+                                    value={editBrokerName}
+                                    onChange={(e) => setEditBrokerName(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label htmlFor="edit_pan_status">Status</Label>
+                                <Select value={editStatus} onValueChange={(val: 'active' | 'inactive') => setEditStatus(val)}>
+                                    <SelectTrigger id="edit_pan_status">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="active">Active</SelectItem>
+                                        <SelectItem value="inactive">Inactive</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <Label htmlFor="edit_pan_notes">Notes</Label>
+                            <Input
+                                id="edit_pan_notes"
+                                placeholder="e.g. Family demat account"
+                                value={editNotes}
+                                onChange={(e) => setEditNotes(e.target.value)}
+                            />
+                        </div>
+
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setEditingPan(null)}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                                Save Changes
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete PAN Confirmation Modal */}
+            <Dialog open={!!deletingPan} onOpenChange={() => setDeletingPan(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                            <Trash2 className="h-5 w-5" /> Delete PAN Record
+                        </DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to delete PAN <strong className="font-mono text-neutral-900 dark:text-neutral-100">{deletingPan?.masked_pan}</strong> ({deletingPan?.account_holder_name || 'No Name'})?
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3.5 text-xs text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+                        <div className="flex items-center gap-1.5 font-semibold text-emerald-900 dark:text-emerald-200 mb-1">
+                            <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                            Data Safety Guaranteed
+                        </div>
+                        <p className="text-emerald-700 dark:text-emerald-400">
+                            This PAN will be removed from your active registry. All historical IPO bids, allotment snapshots, and batch logs containing this PAN remain safe and intact.
+                        </p>
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button type="button" variant="outline" onClick={() => setDeletingPan(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleConfirmDelete}
+                        >
+                            <Trash2 className="h-4 w-4 mr-1.5" />
+                            Confirm Delete
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </AppLayout>

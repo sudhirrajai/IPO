@@ -30,7 +30,11 @@ class UserController extends Controller
             $query->where('role', $request->role);
         }
 
-        if ($request->filled('status')) {
+        if ($request->status === 'archived') {
+            $query->onlyTrashed();
+        } elseif ($request->status === 'all') {
+            $query->withTrashed();
+        } elseif ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
@@ -100,4 +104,98 @@ class UserController extends Controller
 
         return back()->with('success', "User {$user->name} updated successfully.");
     }
+
+    /**
+     * Quick toggle user status between active and inactive.
+     */
+    public function toggleStatus(Request $request, User $user): RedirectResponse
+    {
+        if ($user->id === $request->user()->id) {
+            return back()->with('error', 'You cannot deactivate your own administrative account.');
+        }
+
+        $newStatus = $user->status === 'active' ? 'inactive' : 'active';
+        $old = $user->toArray();
+        $user->update(['status' => $newStatus]);
+
+        AuditService::log(
+            'user_status_toggled',
+            $user,
+            $old,
+            ['status' => $newStatus],
+            "Changed account status of {$user->name} to {$newStatus}"
+        );
+
+        return back()->with('success', "User {$user->name} is now {$newStatus}.");
+    }
+
+    /**
+     * Delete user with safe archive option to preserve historical applications and financials.
+     */
+    public function destroy(Request $request, User $user): RedirectResponse
+    {
+        if ($user->id === $request->user()->id) {
+            return back()->with('error', 'You cannot delete your own administrative account.');
+        }
+
+        $keepDataSafe = $request->boolean('keep_data_safe', true);
+
+        if ($keepDataSafe) {
+            $user->update(['status' => 'archived']);
+            $user->delete(); // Soft-delete
+
+            AuditService::log(
+                'user_archived',
+                $user,
+                null,
+                ['user_id' => $user->id, 'name' => $user->name, 'keep_data_safe' => true],
+                "Safely archived and soft-deleted user {$user->name}. All historical applications and records are preserved."
+            );
+
+            return back()->with('success', "User {$user->name} deleted. Historical applications, PAN records, and financial settlements are preserved safely.");
+        }
+
+        // Permanent deletion validation: check if user has application batches
+        $batchesCount = $user->applicationBatches()->count();
+        if ($batchesCount > 0) {
+            return back()->with('error', "Cannot permanently wipe {$user->name} because they have {$batchesCount} historical IPO application batches. Please select 'Keep Data Safe' to archive them without losing financial records.");
+        }
+
+        $name = $user->name;
+        $id = $user->id;
+
+        $user->pans()->forceDelete();
+        $user->forceDelete();
+
+        AuditService::log(
+            'user_permanently_deleted',
+            null,
+            null,
+            ['user_id' => $id, 'name' => $name],
+            "Permanently deleted user {$name} and their records."
+        );
+
+        return back()->with('success', "User {$name} was permanently removed.");
+    }
+
+    /**
+     * Restore an archived/soft-deleted user account.
+     */
+    public function restore(Request $request, int $id): RedirectResponse
+    {
+        $user = User::onlyTrashed()->findOrFail($id);
+        $user->restore();
+        $user->update(['status' => 'active']);
+
+        AuditService::log(
+            'user_restored',
+            $user,
+            null,
+            ['user_id' => $user->id, 'status' => 'active'],
+            "Restored user {$user->name} and reactivated account."
+        );
+
+        return back()->with('success', "User {$user->name} has been restored and activated successfully.");
+    }
 }
+
