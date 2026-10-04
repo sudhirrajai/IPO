@@ -249,12 +249,31 @@ This project extends the existing Laravel 13 + React 19 + Inertia v3 + Tailwind 
   - Provided CLI command `php artisan ipo:scrape-gmp` with `--dry-run` inspection flag.
   - Added dedicated **InvestorGain Live GMP Scraper** card on `/sync` with instant 1-click **"Scrape Live GMP Now"** trigger, execution metrics, and timestamp tracking.
   - Verified with comprehensive test suite (`tests/Feature/GmpScraperServiceTest.php`): 4 passed, 22 assertions.
-- **Full-Page Circular Glowing Loader, Skeleton Components & Eager Prefetching:**
-  - Upgraded [`PageLoader`](file:///d:/Projects/ipo-app/resources/js/components/page-loader.tsx) to a multi-ring circular glowing spinner with backdrop blur (`backdrop-blur-[3px] bg-neutral-950/30 dark:bg-black/55`).
-  - Circular multi-layer animation: outer ping wave, emerald-to-blue gradient ring spinner, counter-spinning dashed inner ring, and pulsing core indicator.
-  - Dynamically customized action text pill (`Loading IPO workspace & live metrics...`, `Synchronizing IPO feeds...`, `Processing application...`).
-  - Created reusable skeleton components ([`ipo-skeletons.tsx`](file:///d:/Projects/ipo-app/resources/js/components/ipo-skeletons.tsx)): `IpoCardSkeleton`, `IpoGridSkeleton`, and `IpoTableSkeleton` with shimmer pulses.
-  - Integrated Inertia v3 eager prefetching (`prefetch="hover"`) on IPO cards, table rows, and sidebar links for zero-latency, instant transitions.
+- **KFintech Live Allotment Scraper & Modal, Delete Application, Admin PAN Unmasking, and Fix Application Controls (2026-10-04):**
+  - **KFintech Allotment Gateway Integration:**
+    - Reverse-engineered KFintech's live portal (`https://ipostatus.kfintech.com/`) and AWS API Gateway endpoint (`https://0uz601ms56.execute-api.ap-south-1.amazonaws.com/prod/api/query?type=pan`).
+    - Implemented `App\Services\KfintechAllotmentService` with dynamic IPO matching across KFintech's 90+ active registrar listings.
+    - Compares `App_Shares` vs `All_Shares`: if allotted shares > 0, marks application as `allotted` and settles payout/profit; if 0, marks as `not_allotted` and records refunded capital.
+    - Extracts investor's verified legal name from the PAN (e.g. `SUDHIR NARENDRAKUMAR RAJAI`) and updates `applicant_name` on both batch and `user_pans`.
+    - Created reusable [`KfintechAllotmentModal`](file:///d:/Projects/ipo-app/resources/js/components/kfintech-allotment-modal.tsx) matching KFintech's official UI: Application No, Investor Name from PAN, DP ID / Client ID, PAN number, Applied shares, Allotted shares, and status badge with 1-click re-check.
+    - Automated hourly background cron: `Schedule::command('ipo:check-allotment')->hourly()->withoutOverlapping()->runInBackground()` in `routes/console.php`.
+    - Added "Check Allotment" button on each application row with a PAN, plus a header button "Check All KFintech" on the IPO page.
+  - **Delete Application Feature:**
+    - Added `destroy` endpoint in `ApplicationBatchController` with policy authorization (admin can delete any application; regular users can delete their own non-settled applications).
+    - Added Delete icon button (`Trash2`) on both `/applications` and `/ipos/{id}` application tables with confirmation dialog and cascade cleanup of linked PAN records.
+  - **Admin PAN Unmasking & 1-Click Copy:**
+    - Unmasked full PAN numbers (e.g. `ABCDE1234F`) for administrators in all tables and modals, accompanied by a 1-click copy-to-clipboard button with visual feedback.
+    - Non-admin users continue to see secure masked PANs (`XXXXXX1234`).
+  - **Accept Fix Applications Admin Toggle:**
+    - Added `accept_fix_applications` boolean column on `ipos` (default `true`).
+    - Added 1-click toggle button (`Fix Apps: ON / OFF`) in the IPO header for administrators.
+    - When disabled, non-admin users cannot submit applications under the Fixed rate model; the button in the application modal displays `Closed` and disables selection.
+  - **Auto-Approve Fix Applications Feature:**
+    - Added `auto_approve_fix` boolean column on `ipos` (default `true`).
+    - Added toggle button (`Auto-Approve: ON / OFF`) in the IPO header for administrators.
+    - When disabled, user applications under fixed rates enter `pending_approval` status rather than `confirmed`.
+    - Admin is presented with `[✓ Approve]` and `[✗ Reject]` action buttons directly on the application rows.
+
 
 
 
