@@ -37,13 +37,16 @@ class UserPanController extends Controller
             });
         }
 
-        $pans = $query->orderByDesc('id')->paginate(15)->withQueryString();
+        $perPageInput = $request->input('per_page', 25);
+        $perPage = ($perPageInput === 'all' || (int) $perPageInput >= 500) ? 500 : max(10, min(200, (int) $perPageInput));
+
+        $pans = $query->orderByDesc('id')->paginate($perPage)->withQueryString();
         $users = $isAdmin ? User::select(['id', 'name', 'email'])->orderBy('name')->get() : [];
 
         return Inertia::render('pans/index', [
             'pans' => $pans,
             'users' => $users,
-            'filters' => $request->only(['user_id', 'search']),
+            'filters' => $request->only(['user_id', 'search', 'per_page']),
             'isAdmin' => $isAdmin,
         ]);
     }

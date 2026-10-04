@@ -283,9 +283,9 @@ class KfintechAllotmentService
                 'allotment_checked_at' => now(),
             ];
 
-            // Update real name from PAN if not set or generic
-            if (! empty($result['name_from_pan']) && (empty($batch->applicant_name) || str_starts_with($batch->applicant_name, 'Applicant') || $batch->applicant_name === $batch->user?->name)) {
-                $updateData['applicant_name'] = $result['name_from_pan'];
+            // Always update applicant_name with verified name from KFintech allotment record
+            if (! empty($result['name_from_pan'])) {
+                $updateData['applicant_name'] = trim($result['name_from_pan']);
             }
 
             $batch->update($updateData);
@@ -298,13 +298,10 @@ class KfintechAllotmentService
                 "Auto-checked via KFintech Allotment Scraper (Applied: {$result['app_shares']}, Allotted: {$result['all_shares']})"
             );
 
-            // Also update account_holder_name on UserPan if empty
+            // Always update and synchronize verified account_holder_name on UserPan
             if (! empty($result['name_from_pan'])) {
                 UserPan::where('pan_number', strtoupper($pan))
-                    ->where(function ($q) {
-                        $q->whereNull('account_holder_name')->orWhere('account_holder_name', '');
-                    })
-                    ->update(['account_holder_name' => $result['name_from_pan']]);
+                    ->update(['account_holder_name' => trim($result['name_from_pan'])]);
             }
 
             // Update IPO allotment_scraped_at

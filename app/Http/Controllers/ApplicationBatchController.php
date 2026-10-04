@@ -79,7 +79,10 @@ class ApplicationBatchController extends Controller
         }
         $allotmentTodayCount = $todayQuery->count();
 
-        $batches = $query->orderByDesc('id')->paginate(15)->withQueryString();
+        $perPageInput = $request->input('per_page', 25);
+        $perPage = ($perPageInput === 'all' || (int) $perPageInput >= 500) ? 500 : max(10, min(200, (int) $perPageInput));
+
+        $batches = $query->orderByDesc('id')->paginate($perPage)->withQueryString();
 
         if (! $isAdmin) {
             $batches->getCollection()->makeHidden([
@@ -105,7 +108,7 @@ class ApplicationBatchController extends Controller
             'users' => $users,
             'userPans' => $userPans,
             'allotmentTodayCount' => $allotmentTodayCount,
-            'filters' => $request->only(['ipo_id', 'user_id', 'funding_source', 'application_status', 'settlement_status', 'search', 'allotment_today']),
+            'filters' => $request->only(['ipo_id', 'user_id', 'funding_source', 'application_status', 'settlement_status', 'search', 'allotment_today', 'per_page']),
             'isAdmin' => $isAdmin,
         ]);
     }

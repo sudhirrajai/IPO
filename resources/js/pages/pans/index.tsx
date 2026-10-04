@@ -38,6 +38,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import Pagination from '@/components/pagination';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem, User, UserPan } from '@/types';
 
@@ -47,11 +48,16 @@ interface PansIndexProps {
         current_page: number;
         last_page: number;
         total: number;
+        per_page?: number;
+        from?: number | null;
+        to?: number | null;
+        links?: Array<{ url: string | null; label: string; active: boolean }>;
     };
     users: User[];
     filters: {
         user_id?: string;
         search?: string;
+        per_page?: string;
     };
     isAdmin: boolean;
 }
@@ -348,7 +354,7 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                                 </thead>
                                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
                                     {pans.data.map((pan, idx) => {
-                                        const rowNumber = (pans.current_page - 1) * 15 + idx + 1;
+                                        const rowNumber = (pans.current_page - 1) * (pans.per_page || 25) + idx + 1;
                                         const isRevealed = Boolean(revealedPans[pan.id]);
                                         const displayedPan = isRevealed ? revealedPans[pan.id] : pan.masked_pan;
 
@@ -469,10 +475,12 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                                 </tbody>
                             </table>
                         </div>
+                        <Pagination data={pans} itemName="PAN cards" />
                     </div>
                 ) : (
                     /* CARDS GRID VIEW */
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
 
                         {pans.data.map((pan) => {
                             const isRevealed = Boolean(revealedPans[pan.id]);
@@ -597,7 +605,9 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                             );
                         })}
                     </div>
-                )}
+                    <Pagination data={pans} itemName="PAN cards" className="mt-4 border border-neutral-200/90 dark:border-neutral-800 rounded-xl" />
+                </>
+            )}
             </div>
 
             {/* Add PAN Modal */}

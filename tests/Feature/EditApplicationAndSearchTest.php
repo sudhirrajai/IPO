@@ -190,3 +190,102 @@ test('search feature in applications filters by PAN, applicant, batch number, ba
     expect(count($data3))->toBe(1)
         ->and($data3[0]['batch_number'])->toBe('BATCH-ALPHA-01');
 });
+
+test('pan page paginates properly and loads all 23 records with per_page=25', function () {
+    $user = User::factory()->create(['role' => 'user']);
+
+    // Create 23 PAN records
+    for ($i = 1; $i <= 23; $i++) {
+        $pad = str_pad((string) $i, 4, '0', STR_PAD_LEFT);
+        UserPan::create([
+            'user_id' => $user->id,
+            'pan_number' => "ABCDE{$pad}A",
+            'account_holder_name' => "Applicant {$i}",
+            'status' => 'active',
+        ]);
+    }
+
+    // Default per_page=25 loads all 23 records
+    $resDefault = $this->actingAs($user)->get('/pans');
+    $resDefault->assertOk();
+    $pageDefault = $resDefault->original->getData()['page']['props']['pans'];
+    expect($pageDefault['total'])->toBe(23)
+        ->and(count($pageDefault['data']))->toBe(23);
+
+    // With per_page=15, page 1 has 15 and page 2 has 8
+    $resPage1 = $this->actingAs($user)->get('/pans?per_page=15&page=1');
+    $resPage1->assertOk();
+    $pansPage1 = $resPage1->original->getData()['page']['props']['pans'];
+    expect(count($pansPage1['data']))->toBe(15)
+        ->and($pansPage1['last_page'])->toBe(2);
+
+    $resPage2 = $this->actingAs($user)->get('/pans?per_page=15&page=2');
+    $resPage2->assertOk();
+    $pansPage2 = $resPage2->original->getData()['page']['props']['pans'];
+    expect(count($pansPage2['data']))->toBe(8);
+});
+
+test('checking allotment updates database applicant_name and pan account_holder_name from scraped name', function () {
+    $user = User::factory()->create(['role' => 'user']);
+    $ipo = Ipo::create([
+        'company_name' => 'KFintech Tech Ltd',
+        'symbol' => 'KFINTECH',
+        'exchange' => 'NSE',
+        'lot_size' => 50,
+        'kfin_client_id' => '12345',
+        'allotment_date' => now()->toDateString(),
+        'status' => 'allotment_out',
+    ]);
+
+    $userPan = UserPan::create([
+        'user_id' => $user->id,
+        'pan_number' => 'ABCDE9999Z',
+        'account_holder_name' => 'Initial Placeholder Name',
+        'status' => 'active',
+    ]);
+
+    $batch = ApplicationBatch::create([
+        'user_id' => $user->id,
+        'ipo_id' => $ipo->id,
+        'batch_number' => 'BATCH-TEST-ALLOT',
+        'pan_number' => 'ABCDE9999Z',
+        'applicant_name' => 'Old Temporary Name',
+        'application_count' => 1,
+        'profit_sharing_type' => 'fix',
+        'funding_source' => 'user_money',
+        'application_status' => 'submitted',
+        'settlement_status' => 'pending',
+    ]);
+
+    // Mock KFintech HTTP call to simulate scraped allotment with legal name
+    Http::fake([
+        '*execute-api.ap-south-1.amazonaws.com*' => Http::response([
+            [
+                'Appln_No' => 'KFIN8888',
+                'Name' => 'SUDHIR RAJAI OFFICIAL',
+                'All_Shares' => '50',
+                'App_Shares' => '50',
+                'DP_CLID' => 'IN30012345678',
+                'Pan_No' => 'XXXXXX999Z',
+            ]
+        ], 200),
+    ]);
+
+    $result = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
+
+    expect($result['success'])->toBeTrue()
+        ->and($result['name_from_pan'])->toBe('SUDHIR RAJAI OFFICIAL')
+        ->and($result['allotted'])->toBeTrue();
+
+    $batch->refresh();
+    $userPan->refresh();
+
+    // Verify batch applicant_name and allotment_details were updated in database
+    expect($batch->applicant_name)->toBe('SUDHIR RAJAI OFFICIAL')
+        ->and($batch->application_status)->toBe('allotted')
+        ->and($batch->allotment_details['name_from_pan'])->toBe('SUDHIR RAJAI OFFICIAL');
+
+    // Verify UserPan account_holder_name was updated in database
+    expect($userPan->account_holder_name)->toBe('SUDHIR RAJAI OFFICIAL');
+});
+

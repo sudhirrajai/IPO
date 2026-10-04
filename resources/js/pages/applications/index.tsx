@@ -45,6 +45,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import Pagination from '@/components/pagination';
 import AppLayout from '@/layouts/app-layout';
 import { formatIstDate, formatIstDateTime, getIstToday } from '@/lib/utils';
 import type { ApplicationBatch, BreadcrumbItem, Ipo, User, UserPan } from '@/types';
@@ -55,6 +56,10 @@ interface ApplicationsIndexProps {
         current_page: number;
         last_page: number;
         total: number;
+        per_page?: number;
+        from?: number | null;
+        to?: number | null;
+        links?: Array<{ url: string | null; label: string; active: boolean }>;
     };
     ipos: Ipo[];
     users: User[];
@@ -707,7 +712,7 @@ export default function ApplicationsIndex({
                                     </thead>
                                     <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
                                         {batches.data.map((batch, index) => {
-                                            const rowNumber = (batches.current_page - 1) * 15 + index + 1;
+                                            const rowNumber = (batches.current_page - 1) * (batches.per_page || 25) + index + 1;
                                             const pans = batch.batch_pans || [];
                                             const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
                                             const panDisplay = panNumberRaw
@@ -1041,6 +1046,7 @@ export default function ApplicationsIndex({
                                 </table>
                             </div>
                         )}
+                        <Pagination data={batches} itemName="applications" />
                     </CardContent>
                 </Card>
             </div>
