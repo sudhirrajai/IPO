@@ -24,10 +24,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/ipos', [IpoController::class, 'index'])->name('ipos.index');
     Route::get('/ipos/{ipo}', [IpoController::class, 'show'])->name('ipos.show');
     Route::post('/ipos/{ipo}/gmp', [IpoController::class, 'updateGmp'])->name('ipos.gmp');
+    Route::post('/ipos/{ipo}/favorite', [IpoController::class, 'toggleFavorite'])->name('ipos.favorite');
 
     // Applications
     Route::get('/applications', [ApplicationBatchController::class, 'index'])->name('applications.index');
     Route::post('/applications', [ApplicationBatchController::class, 'store'])->name('applications.store');
+    Route::put('/applications/{batch}', [ApplicationBatchController::class, 'update'])->name('applications.update');
+    Route::post('/applications/{batch}/update', [ApplicationBatchController::class, 'update']);
     Route::post('/applications/{batch}/cancel', [ApplicationBatchController::class, 'cancel'])->name('applications.cancel');
     Route::delete('/applications/{batch}', [ApplicationBatchController::class, 'destroy'])->name('applications.destroy');
     Route::match(['get', 'post'], '/applications/{batch}/check-allotment', [ApplicationBatchController::class, 'checkAllotment'])

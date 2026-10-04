@@ -18,8 +18,12 @@ class IpoController extends Controller
         // Automatically ensure dynamic status alignment with current date
         Ipo::recalculateStatuses();
 
+        $user = $request->user();
+        $userFavoritesCount = $user ? $user->favoriteIpos()->count() : 0;
+
         $counts = [
             'all' => Ipo::count(),
+            'favorites' => $userFavoritesCount,
             'open' => Ipo::open()->count(),
             'upcoming' => Ipo::upcoming()->count(),
             'closed' => Ipo::closed()->count(),
@@ -27,8 +31,21 @@ class IpoController extends Controller
 
         $query = Ipo::with('activeRate');
 
+        if ($user) {
+            $query->withExists(['favoritedByUsers as is_favorite' => function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            }]);
+        }
+
         if ($request->filled('status') && $request->status !== 'all') {
-            if ($request->status === 'open') {
+            if ($request->status === 'favorites') {
+                if ($user) {
+                    $favoriteIpoIds = $user->favoriteIpos()->pluck('ipos.id')->toArray();
+                    $query->whereIn('ipos.id', $favoriteIpoIds);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            } elseif ($request->status === 'open') {
                 $query->open();
             } elseif ($request->status === 'upcoming') {
                 $query->upcoming();
@@ -65,6 +82,7 @@ class IpoController extends Controller
             'filters' => $request->only(['status', 'type', 'search']),
         ]);
     }
+
 
     public function show(Request $request, Ipo $ipo): Response
     {
@@ -155,8 +173,11 @@ class IpoController extends Controller
             ->orderBy('upi_id')
             ->get();
 
+        $isFavorite = $user ? $user->favoriteIpos()->where('ipo_id', $ipo->id)->exists() : false;
+
         return Inertia::render('ipos/show', [
             'ipo' => $ipo,
+            'isFavorite' => $isFavorite,
             'batches' => $batches,
             'financials' => $financials,
             'usersList' => $usersList,
@@ -291,4 +312,24 @@ class IpoController extends Controller
 
         return back()->with('success', "Allotment check completed: {$output}");
     }
+
+    public function toggleFavorite(Request $request, Ipo $ipo): RedirectResponse
+    {
+        $user = $request->user();
+        if (! $user) {
+            return back();
+        }
+
+        $isFavorited = $user->favoriteIpos()->where('ipo_id', $ipo->id)->exists();
+        if ($isFavorited) {
+            $user->favoriteIpos()->detach($ipo->id);
+            $msg = "Removed {$ipo->company_name} from favorites.";
+        } else {
+            $user->favoriteIpos()->attach($ipo->id);
+            $msg = "Added {$ipo->company_name} to favorites.";
+        }
+
+        return back()->with('success', $msg);
+    }
 }
+

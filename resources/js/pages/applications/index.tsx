@@ -22,7 +22,8 @@ import {
     TrendingUp,
     X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import EditApplicationModal from '@/components/edit-application-modal';
 import KfintechAllotmentModal, { type AllotmentResultData } from '@/components/kfintech-allotment-modal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -93,7 +94,35 @@ export default function ApplicationsIndex({
     const [selectedStatus, setSelectedStatus] = useState(filters.application_status || 'all');
     const [selectedSettlement, setSelectedSettlement] = useState(filters.settlement_status || 'all');
     const [searchInput, setSearchInput] = useState(filters.search || '');
+    const [searchCountdown, setSearchCountdown] = useState<number | null>(null);
     const isAllotmentTodayFilter = filters.allotment_today === '1';
+
+    // Edit Application modal (Admin only)
+    const [editingBatch, setEditingBatch] = useState<ApplicationBatch | null>(null);
+
+    // Live search 5-second debounce
+    useEffect(() => {
+        const currentAppliedSearch = filters.search || '';
+        if (searchInput === currentAppliedSearch) {
+            setSearchCountdown(null);
+            return;
+        }
+
+        setSearchCountdown(5);
+        const interval = setInterval(() => {
+            setSearchCountdown((prev) => (prev && prev > 1 ? prev - 1 : null));
+        }, 1000);
+
+        const timer = setTimeout(() => {
+            handleFilterChange('search', searchInput);
+            setSearchCountdown(null);
+        }, 5000);
+
+        return () => {
+            clearTimeout(timer);
+            clearInterval(interval);
+        };
+    }, [searchInput, filters.search]);
 
     // Cancel modal
     const [cancellingBatch, setCancellingBatch] = useState<ApplicationBatch | null>(null);
@@ -171,11 +200,13 @@ export default function ApplicationsIndex({
 
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        setSearchCountdown(null);
         handleFilterChange('search', searchInput);
     };
 
     const clearSearch = () => {
         setSearchInput('');
+        setSearchCountdown(null);
         handleFilterChange('search', '');
     };
 
@@ -510,20 +541,28 @@ export default function ApplicationsIndex({
                     <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-[220px]">
                         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" />
                         <Input
-                            placeholder="Search by PAN, applicant, batch #..."
+                            placeholder="Search by PAN, applicant, batch #... (auto-searches in 5s)"
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            className="h-9 pl-8 pr-8 text-xs font-mono"
+                            className="h-9 pl-8 pr-16 text-xs font-mono"
                         />
-                        {searchInput && (
-                            <button
-                                type="button"
-                                onClick={clearSearch}
-                                className="absolute right-2.5 top-2.5 text-neutral-400 hover:text-neutral-600"
-                            >
-                                <X className="h-4 w-4" />
-                            </button>
-                        )}
+                        <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                            {searchCountdown !== null && (
+                                <span className="inline-flex items-center rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 ring-1 ring-inset ring-blue-500/20 animate-pulse">
+                                    {searchCountdown}s
+                                </span>
+                            )}
+                            {searchInput && (
+                                <button
+                                    type="button"
+                                    onClick={clearSearch}
+                                    className="text-neutral-400 hover:text-neutral-600"
+                                    title="Clear search"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            )}
+                        </div>
                     </form>
 
                     {/* Allotment Today Quick Filter Button */}
@@ -950,6 +989,19 @@ export default function ApplicationsIndex({
                                                                 </span>
                                                             )}
 
+                                                            {/* Edit Application Button (Admin Only) */}
+                                                            {isAdmin && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="ghost"
+                                                                    className="h-7 text-xs px-2 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white"
+                                                                    onClick={() => setEditingBatch(batch)}
+                                                                    title="Edit Application (Admin Only)"
+                                                                >
+                                                                    <Edit3 className="h-3 w-3 mr-1 text-blue-600" /> Edit
+                                                                </Button>
+                                                            )}
+
                                                             {/* Cancel Button */}
                                                             {batch.application_status !== 'cancelled' && (
                                                                 <Button
@@ -1260,6 +1312,17 @@ export default function ApplicationsIndex({
                     </form>
                 </DialogContent>
             </Dialog>
+
+            {/* Edit Application Modal (Admin only) */}
+            {isAdmin && editingBatch && (
+                <EditApplicationModal
+                    batch={editingBatch}
+                    ipo={editingBatch.ipo || ipos.find((i) => i.id === editingBatch.ipo_id)}
+                    userPans={userPans}
+                    isOpen={!!editingBatch}
+                    onClose={() => setEditingBatch(null)}
+                />
+            )}
         </AppLayout>
     );
 }

@@ -5,6 +5,7 @@ import {
     CheckCircle2,
     CreditCard,
     DollarSign,
+    Star,
     TrendingUp,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,7 @@ interface UserDashboardProps {
     recentBatches: ApplicationBatch[];
     openIpos: Ipo[];
     categorizedIpos?: {
+        favorites?: Ipo[];
         open: Ipo[];
         upcoming: Ipo[];
         closed: Ipo[];
@@ -43,7 +45,10 @@ export default function UserDashboard({
     openIpos,
     categorizedIpos,
 }: UserDashboardProps) {
-    const [userIpoTab, setUserIpoTab] = useState<'open' | 'upcoming' | 'closed'>('open');
+    const [userIpoTab, setUserIpoTab] = useState<'favorites' | 'open' | 'upcoming' | 'closed'>(
+        categorizedIpos?.favorites && categorizedIpos.favorites.length > 0 ? 'favorites' : 'open'
+    );
+
 
     const displayedIpos = categorizedIpos ? (categorizedIpos[userIpoTab] || []) : openIpos;
     const formatInr = (amount: number | string | null | undefined) => {
@@ -172,8 +177,20 @@ export default function UserDashboard({
                             <div className="flex items-center gap-1 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-800/80 mt-2">
                                 <button
                                     type="button"
+                                    onClick={() => setUserIpoTab('favorites')}
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all flex items-center justify-center gap-1 ${
+                                        userIpoTab === 'favorites'
+                                            ? 'bg-white text-amber-700 shadow-sm dark:bg-neutral-900 dark:text-amber-400'
+                                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
+                                    }`}
+                                >
+                                    <Star className={`h-3 w-3 ${userIpoTab === 'favorites' ? 'fill-amber-400 stroke-amber-500' : ''}`} />
+                                    <span>Favs ({categorizedIpos?.favorites?.length ?? 0})</span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => setUserIpoTab('open')}
-                                    className={`flex-1 rounded-md py-1 px-2 text-xs font-semibold transition-all ${
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all ${
                                         userIpoTab === 'open'
                                             ? 'bg-white text-emerald-700 shadow-sm dark:bg-neutral-900 dark:text-emerald-400'
                                             : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -184,7 +201,7 @@ export default function UserDashboard({
                                 <button
                                     type="button"
                                     onClick={() => setUserIpoTab('upcoming')}
-                                    className={`flex-1 rounded-md py-1 px-2 text-xs font-semibold transition-all ${
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all ${
                                         userIpoTab === 'upcoming'
                                             ? 'bg-white text-blue-700 shadow-sm dark:bg-neutral-900 dark:text-blue-400'
                                             : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -195,7 +212,7 @@ export default function UserDashboard({
                                 <button
                                     type="button"
                                     onClick={() => setUserIpoTab('closed')}
-                                    className={`flex-1 rounded-md py-1 px-2 text-xs font-semibold transition-all ${
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all ${
                                         userIpoTab === 'closed'
                                             ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-900 dark:text-neutral-200'
                                             : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -204,6 +221,7 @@ export default function UserDashboard({
                                     Closed ({categorizedIpos?.closed?.length ?? 0})
                                 </button>
                             </div>
+
                         </CardHeader>
                         <CardContent className="space-y-3">
                             {displayedIpos.length === 0 ? (

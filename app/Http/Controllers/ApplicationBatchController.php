@@ -60,6 +60,10 @@ class ApplicationBatchController extends Controller
                     ->orWhere('batch_number', 'like', "%{$search}%")
                     ->orWhere('bank_name', 'like', "%{$search}%")
                     ->orWhere('upi_id', 'like', "%{$search}%")
+                    ->orWhereHas('user', function ($uq) use ($search) {
+                        $uq->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    })
                     ->orWhereHas('batchPans', function ($bp) use ($search) {
                         $bp->where('pan_number_snapshot', 'like', "%{$search}%");
                     });
@@ -201,6 +205,62 @@ class ApplicationBatchController extends Controller
 
             return back()->with('success', "Application batch {$batch->batch_number} created successfully.");
         } catch (Exception $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
+    public function update(Request $request, ApplicationBatch $batch): RedirectResponse
+    {
+        $user = $request->user();
+        if (! $user || ! $user->isAdmin()) {
+            abort(403, 'Only administrators are authorized to edit applications, rates, and PANs.');
+        }
+
+        if ($batch->settlement_status === 'settled') {
+            return back()->with('error', 'Cannot edit an application that has already been settled.');
+        }
+
+        $validated = $request->validate([
+            'applicant_name' => 'nullable|string|max:150',
+            'bank_name' => 'nullable|string|max:100',
+            'pan_number' => 'nullable|string|max:10',
+            'pan_id' => 'nullable|exists:user_pans,id',
+            'upi_id' => 'nullable|string|max:100',
+            'upi_app' => 'nullable|string|max:50',
+            'profit_sharing_type' => 'nullable|in:fix,percentage,rate_margin',
+            'fix_profit_per_lot' => 'nullable|numeric|min:0',
+            'profit_sharing_value' => 'nullable|numeric|min:0',
+            'trader_rate' => 'nullable|numeric|min:0',
+            'user_rate' => 'nullable|numeric|min:0',
+            'override_trader_rate' => 'nullable|numeric|min:0',
+            'override_published_rate' => 'nullable|numeric|min:0',
+            'lots' => 'nullable|integer|min:1',
+            'application_count' => 'nullable|integer|min:1|max:500',
+            'funding_source' => 'nullable|in:my_money,user_money',
+            'notes' => 'nullable|string|max:1000',
+        ]);
+
+        $lots = $validated['lots'] ?? $validated['application_count'] ?? $batch->application_count ?? 1;
+        $validated['application_count'] = (int) $lots;
+
+        if (($validated['profit_sharing_type'] ?? '') === 'fix' && isset($validated['fix_profit_per_lot'])) {
+            $validated['profit_sharing_value'] = (float) $validated['fix_profit_per_lot'];
+        }
+
+        if (isset($validated['trader_rate']) && ! isset($validated['override_trader_rate'])) {
+            $validated['override_trader_rate'] = (float) $validated['trader_rate'];
+        }
+
+        if (isset($validated['user_rate']) && ! isset($validated['override_published_rate'])) {
+            $validated['override_published_rate'] = (float) $validated['user_rate'];
+        }
+
+        try {
+            $updatedBatch = ApplicationBatchService::updateBatch($batch, $validated, true);
+            AuditService::log('batch_edited', $updatedBatch, null, $validated, "Admin {$user->name} edited application {$batch->batch_number}");
+
+            return back()->with('success', "Application {$batch->batch_number} updated successfully.");
+        } catch (\Exception $e) {
             return back()->with('error', $e->getMessage());
         }
     }
@@ -396,3 +456,4 @@ class ApplicationBatchController extends Controller
         return back()->with('error', 'No valid PAN provided.');
     }
 }
+

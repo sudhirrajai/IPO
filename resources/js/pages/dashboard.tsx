@@ -8,6 +8,7 @@ import {
     CreditCard,
     DollarSign,
     RefreshCw,
+    Star,
     TrendingUp,
     Users,
     Wallet,
@@ -46,6 +47,7 @@ interface DashboardProps {
     recentRateChanges: IpoRate[];
     upcomingIpos: Ipo[];
     categorizedIpos?: {
+        favorites?: Ipo[];
         open: Ipo[];
         upcoming: Ipo[];
         closed: Ipo[];
@@ -71,7 +73,10 @@ export default function Dashboard({
     categorizedIpos,
     chartData,
 }: DashboardProps) {
-    const [ipoCategoryTab, setIpoCategoryTab] = useState<'open' | 'upcoming' | 'closed'>('open');
+    const [ipoCategoryTab, setIpoCategoryTab] = useState<'favorites' | 'open' | 'upcoming' | 'closed'>(
+        categorizedIpos?.favorites && categorizedIpos.favorites.length > 0 ? 'favorites' : 'open'
+    );
+
 
     const displayedIpos = categorizedIpos ? (categorizedIpos[ipoCategoryTab] || []) : upcomingIpos;
     const formatInr = (amount: number) => {
@@ -297,8 +302,20 @@ export default function Dashboard({
                             <div className="flex items-center gap-1 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-800/80 mt-2">
                                 <button
                                     type="button"
+                                    onClick={() => setIpoCategoryTab('favorites')}
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all flex items-center justify-center gap-1 ${
+                                        ipoCategoryTab === 'favorites'
+                                            ? 'bg-white text-amber-700 shadow-sm dark:bg-neutral-900 dark:text-amber-400'
+                                            : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
+                                    }`}
+                                >
+                                    <Star className={`h-3 w-3 ${ipoCategoryTab === 'favorites' ? 'fill-amber-400 stroke-amber-500' : ''}`} />
+                                    <span>Favs ({categorizedIpos?.favorites?.length ?? 0})</span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => setIpoCategoryTab('open')}
-                                    className={`flex-1 rounded-md py-1 px-2 text-xs font-semibold transition-all ${
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all ${
                                         ipoCategoryTab === 'open'
                                             ? 'bg-white text-emerald-700 shadow-sm dark:bg-neutral-900 dark:text-emerald-400'
                                             : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -309,7 +326,7 @@ export default function Dashboard({
                                 <button
                                     type="button"
                                     onClick={() => setIpoCategoryTab('upcoming')}
-                                    className={`flex-1 rounded-md py-1 px-2 text-xs font-semibold transition-all ${
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all ${
                                         ipoCategoryTab === 'upcoming'
                                             ? 'bg-white text-blue-700 shadow-sm dark:bg-neutral-900 dark:text-blue-400'
                                             : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -320,7 +337,7 @@ export default function Dashboard({
                                 <button
                                     type="button"
                                     onClick={() => setIpoCategoryTab('closed')}
-                                    className={`flex-1 rounded-md py-1 px-2 text-xs font-semibold transition-all ${
+                                    className={`flex-1 rounded-md py-1 px-1.5 text-xs font-semibold transition-all ${
                                         ipoCategoryTab === 'closed'
                                             ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-900 dark:text-neutral-200'
                                             : 'text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
@@ -329,6 +346,7 @@ export default function Dashboard({
                                     Closed ({metrics.closedIpos})
                                 </button>
                             </div>
+
                         </CardHeader>
                         <CardContent className="space-y-3">
                             {displayedIpos.length === 0 ? (

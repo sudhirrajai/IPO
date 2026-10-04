@@ -134,6 +134,11 @@ class Ipo extends Model
         ];
     }
 
+    public function favoritedByUsers(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_favorite_ipos', 'ipo_id', 'user_id')->withTimestamps();
+    }
+
     public function rates(): HasMany
     {
         return $this->hasMany(IpoRate::class)->orderByDesc('id');

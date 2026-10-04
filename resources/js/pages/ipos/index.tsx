@@ -8,6 +8,7 @@ import {
     Plus,
     RefreshCw,
     Search,
+    Star,
     TrendingUp,
     Zap,
 } from 'lucide-react';
@@ -44,6 +45,7 @@ interface IposIndexProps {
     };
     counts?: {
         all: number;
+        favorites?: number;
         open: number;
         upcoming: number;
         closed: number;
@@ -54,6 +56,7 @@ interface IposIndexProps {
         search?: string;
     };
 }
+
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -92,6 +95,32 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
         status: 'open',
     });
 
+    const [favoritesMap, setFavoritesMap] = useState<Record<number, boolean>>(() => {
+        const map: Record<number, boolean> = {};
+        ipos.data.forEach((item) => {
+            map[item.id] = Boolean(item.is_favorite);
+        });
+        return map;
+    });
+
+    const handleToggleFavorite = (e: React.MouseEvent, ipoId: number) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setFavoritesMap((prev) => ({
+            ...prev,
+            [ipoId]: !prev[ipoId],
+        }));
+        router.post(`/ipos/${ipoId}/favorite`, {}, {
+            preserveScroll: true,
+            onError: () => {
+                setFavoritesMap((prev) => ({
+                    ...prev,
+                    [ipoId]: !prev[ipoId],
+                }));
+            },
+        });
+    };
+
     const handleFilterChange = (key: string, value: string) => {
         const newFilters: Record<string, string> = {
             search,
@@ -113,6 +142,7 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
 
         router.get('/ipos', newFilters, { preserveState: true, replace: true });
     };
+
 
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -192,19 +222,17 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     <button
                         type="button"
                         onClick={() => handleFilterChange('status', 'all')}
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
-                            statusFilter === 'all'
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${statusFilter === 'all'
                                 ? 'bg-neutral-900 text-white shadow-sm dark:bg-white dark:text-neutral-900'
                                 : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white'
-                        }`}
+                            }`}
                     >
                         <span>All IPOs</span>
                         <span
-                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
-                                statusFilter === 'all'
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${statusFilter === 'all'
                                     ? 'bg-neutral-700 text-white dark:bg-neutral-200 dark:text-neutral-900'
                                     : 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
-                            }`}
+                                }`}
                         >
                             {counts?.all ?? ipos.total}
                         </span>
@@ -212,12 +240,32 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
 
                     <button
                         type="button"
+                        onClick={() => handleFilterChange('status', 'favorites')}
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${statusFilter === 'favorites'
+                                ? 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-500/30'
+                                : 'text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40'
+                            }`}
+                    >
+                        <Star className={`h-3.5 w-3.5 ${statusFilter === 'favorites' ? 'fill-white stroke-white' : 'fill-amber-400 stroke-amber-500'}`} />
+                        <span>Favorites</span>
+                        <span
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${statusFilter === 'favorites'
+                                    ? 'bg-amber-700 text-white'
+                                    : 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300'
+                                }`}
+                        >
+                            {counts?.favorites ?? 0}
+                        </span>
+                    </button>
+
+
+                    <button
+                        type="button"
                         onClick={() => handleFilterChange('status', 'open')}
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
-                            statusFilter === 'open'
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${statusFilter === 'open'
                                 ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-600/30'
                                 : 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
-                        }`}
+                            }`}
                     >
                         <span className="relative flex h-2 w-2">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -225,11 +273,10 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                         </span>
                         <span>Open for Bidding</span>
                         <span
-                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
-                                statusFilter === 'open'
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${statusFilter === 'open'
                                     ? 'bg-emerald-700 text-white'
                                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300'
-                            }`}
+                                }`}
                         >
                             {counts?.open ?? 0}
                         </span>
@@ -238,20 +285,18 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     <button
                         type="button"
                         onClick={() => handleFilterChange('status', 'upcoming')}
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
-                            statusFilter === 'upcoming'
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${statusFilter === 'upcoming'
                                 ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-600/30'
                                 : 'text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40'
-                        }`}
+                            }`}
                     >
                         <Calendar className="h-3.5 w-3.5" />
                         <span>Upcoming</span>
                         <span
-                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
-                                statusFilter === 'upcoming'
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${statusFilter === 'upcoming'
                                     ? 'bg-blue-700 text-white'
                                     : 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300'
-                            }`}
+                                }`}
                         >
                             {counts?.upcoming ?? 0}
                         </span>
@@ -260,19 +305,17 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     <button
                         type="button"
                         onClick={() => handleFilterChange('status', 'closed')}
-                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${
-                            statusFilter === 'closed'
+                        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all ${statusFilter === 'closed'
                                 ? 'bg-neutral-600 text-white shadow-sm ring-2 ring-neutral-600/30'
                                 : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800'
-                        }`}
+                            }`}
                     >
                         <span>Closed</span>
                         <span
-                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${
-                                statusFilter === 'closed'
+                            className={`rounded-full px-1.5 py-0.2 text-[11px] font-mono font-bold ${statusFilter === 'closed'
                                     ? 'bg-neutral-700 text-white'
                                     : 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
-                            }`}
+                                }`}
                         >
                             {counts?.closed ?? 0}
                         </span>
@@ -314,11 +357,10 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                             <button
                                 type="button"
                                 onClick={() => setViewMode('list')}
-                                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                                    viewMode === 'list'
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${viewMode === 'list'
                                         ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-50 shadow-xs'
                                         : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400'
-                                }`}
+                                    }`}
                                 title="Compact List View"
                                 aria-label="Compact List View"
                             >
@@ -328,11 +370,10 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                             <button
                                 type="button"
                                 onClick={() => setViewMode('grid')}
-                                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                                    viewMode === 'grid'
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${viewMode === 'grid'
                                         ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-50 shadow-xs'
                                         : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400'
-                                }`}
+                                    }`}
                                 title="Grid Cards View"
                                 aria-label="Grid Cards View"
                             >
@@ -386,13 +427,12 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                                 </Badge>
 
                                                 <Badge
-                                                    className={`capitalize text-[10px] font-semibold px-2 py-0.2 ${
-                                                        isIpoOpen
+                                                    className={`capitalize text-[10px] font-semibold px-2 py-0.2 ${isIpoOpen
                                                             ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30'
                                                             : isIpoUpcoming
-                                                            ? 'bg-blue-500/10 text-blue-600 border border-blue-500/30'
-                                                            : 'bg-neutral-500/10 text-neutral-600 border border-neutral-500/20'
-                                                    }`}
+                                                                ? 'bg-blue-500/10 text-blue-600 border border-blue-500/30'
+                                                                : 'bg-neutral-500/10 text-neutral-600 border border-neutral-500/20'
+                                                        }`}
                                                 >
                                                     {isIpoOpen && (
                                                         <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -407,9 +447,23 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                                 )}
                                             </div>
 
-                                            <h3 className="font-bold text-sm sm:text-base text-neutral-900 dark:text-neutral-50 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">
-                                                {ipo.company_name}
-                                            </h3>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-bold text-sm sm:text-base text-neutral-900 dark:text-neutral-50 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">
+                                                    {ipo.company_name}
+                                                </h3>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => handleToggleFavorite(e, ipo.id)}
+                                                    className={`p-1 rounded-md transition-all hover:scale-110 shrink-0 ${favoritesMap[ipo.id]
+                                                            ? 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                                                            : 'text-neutral-300 hover:text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                                                        }`}
+                                                    title={favoritesMap[ipo.id] ? 'Favorited' : 'Add to Favorites'}
+                                                >
+                                                    <Star className={`h-4 w-4 ${favoritesMap[ipo.id] ? 'fill-amber-400 stroke-amber-500' : 'stroke-current'}`} />
+                                                </button>
+                                            </div>
+
 
                                             <div className="mt-1 flex items-center gap-3 text-xs text-neutral-500 dark:text-neutral-400 flex-wrap">
                                                 <span className="font-mono text-[11px] text-neutral-400">
@@ -421,8 +475,8 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                                         {ipo.price_band_min && ipo.price_band_max
                                                             ? `₹${ipo.price_band_min} - ₹${ipo.price_band_max}`
                                                             : ipo.issue_price
-                                                            ? `₹${ipo.issue_price}`
-                                                            : 'TBD'}
+                                                                ? `₹${ipo.issue_price}`
+                                                                : 'TBD'}
                                                     </strong>
                                                 </span>
                                                 <span>•</span>
@@ -461,8 +515,8 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                                     {isIpoOpen
                                                         ? ipo.close_date || 'Closing Soon'
                                                         : isIpoUpcoming
-                                                        ? ipo.open_date || 'Opening Soon'
-                                                        : ipo.allotment_date || 'Closed'}
+                                                            ? ipo.open_date || 'Opening Soon'
+                                                            : ipo.allotment_date || 'Closed'}
                                                 </span>
                                             </div>
 
@@ -504,13 +558,12 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                                 </span>
                                             </div>
                                             <Badge
-                                                className={`capitalize text-xs font-semibold px-2.5 py-1 ${
-                                                    isIpoOpen
+                                                className={`capitalize text-xs font-semibold px-2.5 py-1 ${isIpoOpen
                                                         ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30'
                                                         : isIpoUpcoming
-                                                        ? 'bg-blue-500/10 text-blue-600 border border-blue-500/30'
-                                                        : 'bg-neutral-500/10 text-neutral-600 border border-neutral-500/20'
-                                                }`}
+                                                            ? 'bg-blue-500/10 text-blue-600 border border-blue-500/30'
+                                                            : 'bg-neutral-500/10 text-neutral-600 border border-neutral-500/20'
+                                                    }`}
                                             >
                                                 {isIpoOpen && (
                                                     <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -531,8 +584,8 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                                                     {ipo.price_band_min && ipo.price_band_max
                                                         ? `₹${ipo.price_band_min} - ₹${ipo.price_band_max}`
                                                         : ipo.issue_price
-                                                        ? `₹${ipo.issue_price}`
-                                                        : 'TBD'}
+                                                            ? `₹${ipo.issue_price}`
+                                                            : 'TBD'}
                                                 </span>
                                             </div>
                                             <div>

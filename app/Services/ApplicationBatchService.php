@@ -290,4 +290,151 @@ class ApplicationBatchService
 
         return $batch;
     }
+
+    /**
+     * Update an application batch (Admin only).
+     * Allows editing PAN, rates (Fixed, Percentage, or Rate Margin), and recalculates financials.
+     */
+    public static function updateBatch(ApplicationBatch $batch, array $data, bool $isAdmin = true): ApplicationBatch
+    {
+        if (! $isAdmin) {
+            throw new InvalidArgumentException('Only administrators can edit application rates and PANs.');
+        }
+
+        $ipo = $batch->ipo ?: Ipo::findOrFail($batch->ipo_id);
+        $count = max(1, (int) ($data['application_count'] ?? $batch->application_count ?? 1));
+        $fundingSource = ($data['funding_source'] ?? $batch->funding_source) === 'user_money' ? 'user_money' : 'my_money';
+
+        $profitSharingType = $data['profit_sharing_type'] ?? $batch->profit_sharing_type ?? 'fix';
+        $profitSharingValue = isset($data['profit_sharing_value']) ? (float) $data['profit_sharing_value'] : (float) ($batch->profit_sharing_value ?? 0.0);
+
+        $lotSize = (int) ($ipo->lot_size ?? 1);
+        $issuePrice = (float) ($ipo->issue_price ?? $ipo->price_band_max ?? 0);
+        $capitalPerApp = isset($data['capital_per_application']) && (float) $data['capital_per_application'] > 0
+            ? (float) $data['capital_per_application']
+            : ($batch->capital_amount && $batch->application_count ? (float) ($batch->capital_amount / $batch->application_count) : (float) ($lotSize * $issuePrice));
+
+        $totalCapital = round($capitalPerApp * $count, 2);
+        $gmpSnapshot = (float) ($batch->gmp_snapshot ?: ($ipo->gmp ?? 0));
+        $expectedListingGain = round($lotSize * $gmpSnapshot * $count, 2);
+
+        $traderRate = 0.0;
+        $publishedRate = 0.0;
+        $margin = 0.0;
+
+        if ($profitSharingType === 'fix') {
+            $userPayout = round($profitSharingValue * $count, 2);
+            $grossProfit = $expectedListingGain > 0 ? $expectedListingGain : round($userPayout, 2);
+            $netEarnings = round($grossProfit - $userPayout, 2);
+            $capitalAmount = $totalCapital;
+        } elseif ($profitSharingType === 'percentage') {
+            $userPayout = round(($profitSharingValue / 100) * $expectedListingGain, 2);
+            $grossProfit = $expectedListingGain;
+            $netEarnings = round($grossProfit - $userPayout, 2);
+            $capitalAmount = $totalCapital;
+        } else {
+            $traderRate = isset($data['override_trader_rate']) ? (float) $data['override_trader_rate'] : (float) ($batch->trader_rate_snapshot ?? 0);
+            $publishedRate = isset($data['override_published_rate']) ? (float) $data['override_published_rate'] : (float) ($batch->published_rate_snapshot ?? 0);
+            $margin = FinancialCalculationService::calculateMargin($traderRate, $publishedRate);
+
+            $estimates = FinancialCalculationService::computeBatchEstimates(
+                $fundingSource,
+                $count,
+                $traderRate,
+                $publishedRate,
+                $capitalPerApp
+            );
+
+            $grossProfit = $estimates['expected_gross_profit'];
+            $userPayout = $estimates['expected_user_payout'];
+            $netEarnings = $estimates['expected_net_earnings'];
+            $capitalAmount = $estimates['capital_amount'];
+        }
+
+        // Handle PAN updates
+        $panNum = null;
+        $userPanId = null;
+        if (! empty($data['pan_id'])) {
+            $savedPan = UserPan::find($data['pan_id']);
+            if ($savedPan) {
+                $panNum = strtoupper($savedPan->pan_number);
+                $userPanId = $savedPan->id;
+                if (empty($data['applicant_name']) && ! empty($savedPan->account_holder_name)) {
+                    $data['applicant_name'] = $savedPan->account_holder_name;
+                }
+            }
+        } elseif (! empty($data['pan_number'])) {
+            $panNum = strtoupper(trim($data['pan_number']));
+            $createdPan = UserPan::firstOrCreate([
+                'user_id' => $batch->user_id,
+                'pan_number' => $panNum,
+            ], [
+                'account_holder_name' => $data['applicant_name'] ?? $batch->applicant_name ?? 'Applicant',
+                'status' => 'active',
+            ]);
+            $userPanId = $createdPan->id;
+        }
+
+        $updateFields = [
+            'application_count' => $count,
+            'funding_source' => $fundingSource,
+            'profit_sharing_type' => $profitSharingType,
+            'profit_sharing_value' => $profitSharingValue,
+            'capital_amount' => $capitalAmount,
+            'expected_gross_profit' => $grossProfit,
+            'expected_user_payout' => $userPayout,
+            'expected_net_earnings' => $netEarnings,
+            'trader_rate_snapshot' => $traderRate,
+            'published_rate_snapshot' => $publishedRate,
+            'margin_snapshot' => $margin,
+        ];
+
+        // If batch was already marked allotted, keep settled values in sync with new rates
+        if ($batch->application_status === 'allotted') {
+            $updateFields['settled_gross_profit'] = $grossProfit;
+            $updateFields['settled_user_payout'] = $userPayout;
+            $updateFields['settled_net_earnings'] = $netEarnings;
+            $updateFields['capital_returned'] = $capitalAmount;
+        }
+
+        if (! empty($data['applicant_name'])) {
+            $updateFields['applicant_name'] = $data['applicant_name'];
+        }
+        if (! empty($data['bank_name'])) {
+            $updateFields['bank_name'] = $data['bank_name'];
+        }
+        if (isset($data['upi_id'])) {
+            $updateFields['upi_id'] = $data['upi_id'];
+        }
+        if (isset($data['upi_app'])) {
+            $updateFields['upi_app'] = $data['upi_app'];
+        }
+        if (isset($data['notes'])) {
+            $updateFields['notes'] = $data['notes'];
+        }
+        if ($panNum) {
+            $updateFields['pan_number'] = $panNum;
+        }
+
+        $batch->update($updateFields);
+
+        if ($panNum) {
+            $batchPan = $batch->batchPans()->first();
+            if ($batchPan) {
+                $batchPan->update([
+                    'pan_number_snapshot' => $panNum,
+                    'user_pan_id' => $userPanId ?? $batchPan->user_pan_id,
+                ]);
+            } else {
+                $batch->batchPans()->create([
+                    'user_pan_id' => $userPanId,
+                    'pan_number_snapshot' => $panNum,
+                    'shares_allotted' => 0,
+                    'is_allotted' => false,
+                ]);
+            }
+        }
+
+        return $batch->fresh(['user', 'rate', 'batchPans.userPan', 'settlement']);
+    }
 }

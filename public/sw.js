@@ -1,7 +1,6 @@
 // Service Worker for IPO Applications PWA
-const CACHE_NAME = 'ipo-hub-v1';
+const CACHE_NAME = 'ipo-hub-v2';
 const STATIC_ASSETS = [
-  '/',
   '/manifest.json',
   '/favicon.svg',
   '/pwa-192x192.png',
@@ -41,7 +40,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Never intercept Inertia requests, API endpoints, or auth routes
+  const isInertia = event.request.headers.get('X-Inertia');
+  const acceptHeader = event.request.headers.get('Accept') || '';
+  if (isInertia || acceptHeader.includes('application/json')) {
+    return;
+  }
+
   const url = new URL(event.request.url);
+
+  if (
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/logout') ||
+    url.pathname.startsWith('/login')
+  ) {
+    return;
+  }
 
   // For static build assets or icons, use Stale-While-Revalidate
   if (
@@ -70,13 +84,5 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-
-  // For HTML / Inertia visits, always use Network First to get latest data
-  event.respondWith(
-    fetch(event.request).catch(async () => {
-      const cached = await caches.match(event.request);
-      if (cached) return cached;
-      return caches.match('/');
-    })
-  );
 });
+

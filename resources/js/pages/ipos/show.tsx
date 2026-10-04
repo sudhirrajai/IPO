@@ -10,6 +10,7 @@ import {
     CheckCheck,
     CheckCircle2,
     ChevronDown,
+    ChevronRight,
     Clock,
     Copy,
     CreditCard,
@@ -22,6 +23,7 @@ import {
     FileText,
     History,
     Landmark,
+    Layers,
     Percent,
     PieChart,
     Plus,
@@ -32,15 +34,18 @@ import {
     ShieldCheck,
     Smartphone,
     Sparkles,
+    Star,
     ToggleLeft,
     ToggleRight,
     Trash2,
     TrendingUp,
+    UserCheck,
     Users,
     Wallet,
     X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import EditApplicationModal from '@/components/edit-application-modal';
 import KfintechAllotmentModal, { type AllotmentResultData } from '@/components/kfintech-allotment-modal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -94,6 +99,7 @@ interface IpoShowProps {
     bankAccounts?: BankAccount[];
     userUpis?: UserUpi[];
     isAdmin: boolean;
+    isFavorite?: boolean;
 }
 
 export default function IpoShow({
@@ -105,9 +111,85 @@ export default function IpoShow({
     bankAccounts = [],
     userUpis = [],
     isAdmin: isAdminProp,
+    isFavorite: isFavoriteProp,
 }: IpoShowProps) {
     const { auth } = usePage<{ auth: { user: User } }>().props;
     const isAdmin = auth.user?.role === 'admin';
+
+    const [isFavorite, setIsFavorite] = useState<boolean>(isFavoriteProp ?? ipo.is_favorite ?? false);
+    const [adminAppsSubTab, setAdminAppsSubTab] = useState<'all' | 'grouped'>('all');
+    const [expandedUserGroups, setExpandedUserGroups] = useState<Record<string, boolean>>({});
+
+    // Applications Live Search with 5-second delay
+    const [appsSearchInput, setAppsSearchInput] = useState('');
+    const [appliedAppsSearch, setAppliedAppsSearch] = useState('');
+    const [searchCountdown, setSearchCountdown] = useState<number | null>(null);
+
+    // Edit Application Modal state (Admin only)
+    const [editingBatch, setEditingBatch] = useState<ApplicationBatch | null>(null);
+
+    useEffect(() => {
+        if (appsSearchInput === appliedAppsSearch) {
+            setSearchCountdown(null);
+            return;
+        }
+
+        setSearchCountdown(5);
+        const interval = setInterval(() => {
+            setSearchCountdown((prev) => (prev && prev > 1 ? prev - 1 : null));
+        }, 1000);
+
+        const timer = setTimeout(() => {
+            setAppliedAppsSearch(appsSearchInput);
+            setSearchCountdown(null);
+        }, 5000);
+
+        return () => {
+            clearTimeout(timer);
+            clearInterval(interval);
+        };
+    }, [appsSearchInput, appliedAppsSearch]);
+
+    const filteredBatches = useMemo(() => {
+        if (!appliedAppsSearch.trim()) return batches;
+        const q = appliedAppsSearch.toLowerCase().trim();
+        return batches.filter((batch) => {
+            const pans = batch.batch_pans || [];
+            const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
+            const applicant = (batch.applicant_name || batch.user?.name || '').toLowerCase();
+            const batchNum = (batch.batch_number || '').toLowerCase();
+            const pan = panNumberRaw.toLowerCase();
+            const bank = (batch.bank_name || '').toLowerCase();
+            const upi = (batch.upi_id || '').toLowerCase();
+            const userEmail = (batch.user?.email || '').toLowerCase();
+            const notes = (batch.notes || '').toLowerCase();
+
+            return applicant.includes(q) ||
+                batchNum.includes(q) ||
+                pan.includes(q) ||
+                bank.includes(q) ||
+                upi.includes(q) ||
+                userEmail.includes(q) ||
+                notes.includes(q);
+        });
+    }, [batches, appliedAppsSearch]);
+
+    const toggleUserGroup = (userId: string) => {
+        setExpandedUserGroups((prev) => ({
+            ...prev,
+            [userId]: prev[userId] === undefined ? false : !prev[userId],
+        }));
+    };
+
+    const handleToggleFavorite = () => {
+        setIsFavorite((prev) => !prev);
+        router.post(`/ipos/${ipo.id}/favorite`, {}, {
+            preserveScroll: true,
+            onError: () => {
+                setIsFavorite((prev) => !prev);
+            },
+        });
+    };
 
     const getInitialTab = (): 'overview' | 'applications' | 'rates' | 'funding' | 'exports' => {
         if (typeof window === 'undefined') return 'overview';
@@ -278,6 +360,70 @@ export default function IpoShow({
         setCopiedPan(pan);
         setTimeout(() => setCopiedPan(null), 2000);
     };
+
+    const groupedByUser = useMemo(() => {
+        const groupsMap = new Map<string, {
+            userId: string;
+            userName: string;
+            userEmail: string;
+            batches: ApplicationBatch[];
+            totalApplications: number;
+            totalLots: number;
+            totalCapital: number;
+            totalUserPayout: number;
+            totalAdminMargin: number;
+            allottedCount: number;
+            notAllottedCount: number;
+            pendingApprovalCount: number;
+        }>();
+
+        batches.forEach((batch) => {
+            const uId = batch.user_id ? String(batch.user_id) : 'guest';
+            const uName = batch.user?.name || batch.applicant_name || 'Guest / Direct';
+            const uEmail = batch.user?.email || 'No email registered';
+
+            if (!groupsMap.has(uId)) {
+                groupsMap.set(uId, {
+                    userId: uId,
+                    userName: uName,
+                    userEmail: uEmail,
+                    batches: [],
+                    totalApplications: 0,
+                    totalLots: 0,
+                    totalCapital: 0,
+                    totalUserPayout: 0,
+                    totalAdminMargin: 0,
+                    allottedCount: 0,
+                    notAllottedCount: 0,
+                    pendingApprovalCount: 0,
+                });
+            }
+
+            const group = groupsMap.get(uId)!;
+            group.batches.push(batch);
+            group.totalApplications += 1;
+            group.totalLots += Number(batch.application_count || 1);
+            group.totalCapital += Number(batch.ipo_amount || batch.capital_amount || 0);
+            group.totalUserPayout += Number(batch.settled_user_payout ?? batch.expected_user_payout ?? 0);
+            group.totalAdminMargin += Number(batch.settled_net_earnings ?? batch.expected_net_earnings ?? 0);
+
+            const locallyChecked = checkedBatchIds[batch.id];
+            const hasAutoCheckResult = Boolean(
+                batch.allotment_details ||
+                batch.allotment_checked_at ||
+                locallyChecked
+            );
+            const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (batch.allotment_details?.allotted || locallyChecked?.allotted));
+            const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!batch.allotment_details?.allotted && !locallyChecked?.allotted));
+            const isPendingApproval = batch.application_status === 'pending_approval' || batch.application_status === 'submitted';
+
+            if (isAllotted) group.allottedCount += 1;
+            else if (isNotAllotted) group.notAllottedCount += 1;
+            else if (isPendingApproval) group.pendingApprovalCount += 1;
+        });
+
+        return Array.from(groupsMap.values());
+    }, [filteredBatches, checkedBatchIds]);
 
     const handleCheckAllotment = async (batch: ApplicationBatch) => {
         setAllotmentBatch(batch);
@@ -661,9 +807,23 @@ export default function IpoShow({
                                 {ipo.status}
                             </Badge>
                         </div>
-                        <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50">
-                            {ipo.company_name} {ipo.symbol && <span className="text-neutral-400 font-normal">({ipo.symbol})</span>}
-                        </h1>
+                        <div className="flex items-center gap-2.5">
+                            <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50">
+                                {ipo.company_name} {ipo.symbol && <span className="text-neutral-400 font-normal">({ipo.symbol})</span>}
+                            </h1>
+                            <button
+                                type="button"
+                                onClick={handleToggleFavorite}
+                                className={`p-1.5 rounded-lg border transition-all ${
+                                    isFavorite
+                                        ? 'border-amber-400 bg-amber-50 text-amber-500 dark:bg-amber-950/40 dark:border-amber-500/50 dark:text-amber-400 shadow-2xs'
+                                        : 'border-neutral-200 bg-white text-neutral-400 hover:text-neutral-600 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:text-neutral-200'
+                                }`}
+                                title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                            >
+                                <Star className={`h-5 w-5 ${isFavorite ? 'fill-amber-400 text-amber-500' : ''}`} />
+                            </button>
+                        </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -1332,6 +1492,362 @@ export default function IpoShow({
                         (b) => b.application_status === 'pending_approval' || b.application_status === 'submitted'
                     ).length;
 
+                    const renderBatchesTable = (batchList: ApplicationBatch[]) => (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800">
+                                    <tr>
+                                        <th className="py-3 px-3">Applicant & Batch</th>
+                                        <th className="py-3 px-3">Bank</th>
+                                        <th className="py-3 px-3">PAN & UPI</th>
+                                        <th className="py-3 px-3">IPO Amount</th>
+                                        <th className="py-3 px-3">Current GMP</th>
+                                        <th className="py-3 px-3">Profit Sharing</th>
+                                        <th className="py-3 px-3">Est. Payout / Net</th>
+                                        <th className="py-3 px-3">Status</th>
+                                        <th className="py-3 px-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                                    {batchList.map((batch) => {
+                                        const pans = batch.batch_pans || [];
+                                        const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
+                                        const panDisplay = panNumberRaw
+                                            ? (isAdmin ? panNumberRaw : `XXXXXX${panNumberRaw.slice(-4)}`)
+                                            : 'No PAN';
+
+                                        const locallyChecked = checkedBatchIds[batch.id];
+                                        const hasAutoCheckResult = Boolean(
+                                            batch.allotment_details ||
+                                            batch.allotment_checked_at ||
+                                            locallyChecked
+                                        );
+
+                                        const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (batch.allotment_details?.allotted || locallyChecked?.allotted));
+                                        const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!batch.allotment_details?.allotted && !locallyChecked?.allotted));
+                                        const isPendingApproval = batch.application_status === 'pending_approval' || batch.application_status === 'submitted';
+                                        const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval && !hasAutoCheckResult;
+
+                                        const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
+
+                                        const hasAllotmentDate = Boolean(batch.ipo?.allotment_date || ipo.allotment_date);
+                                        const allotmentDateStr = (batch.ipo?.allotment_date || ipo.allotment_date)?.split('T')[0] ?? null;
+                                        const isAllotmentDateReached = Boolean(allotmentDateStr && todayIst >= allotmentDateStr);
+                                        const isBatchAllotmentToday = Boolean(allotmentDateStr && allotmentDateStr === todayIst);
+                                        const showAllotmentButton = Boolean(
+                                            panNumberRaw &&
+                                            batch.application_status !== 'cancelled' &&
+                                            hasAllotmentDate &&
+                                            (isAllotmentDateReached || isAdmin)
+                                        );
+
+                                        return (
+                                            <tr
+                                                key={batch.id}
+                                                className={`transition-colors ${
+                                                    isBatchAllotmentToday
+                                                        ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70 border-l-4 border-l-amber-500'
+                                                        : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
+                                                }`}
+                                            >
+                                                <td className="py-3 px-3">
+                                                    <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
+                                                        {batch.applicant_name || batch.user?.name || 'Applicant'}
+                                                    </span>
+                                                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                        <span className="font-mono text-[11px] text-neutral-400">
+                                                            {batch.batch_number} · {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
+                                                        </span>
+                                                        {isBatchAllotmentToday ? (
+                                                            <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-4">
+                                                                <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Allotment Today
+                                                            </Badge>
+                                                        ) : hasAllotmentDate ? (
+                                                            <span className="text-[10px] text-neutral-400 font-sans">
+                                                                Allotment: {formatIstDate(allotmentDateStr)}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+                                                </td>
+                                                <td className="py-3 px-3">
+                                                    {batch.bank_name ? (
+                                                        <span className="inline-flex items-center gap-1 font-medium text-xs text-neutral-700 dark:text-neutral-300">
+                                                            <Landmark className="h-3.5 w-3.5 text-blue-500" />
+                                                            {batch.bank_name}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs text-neutral-400">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-3">
+                                                    <div className="flex items-center gap-1.5 font-mono text-xs font-medium text-neutral-800 dark:text-neutral-200">
+                                                        <span>{panDisplay}</span>
+                                                        {isAdmin && panNumberRaw && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => copyPan(panNumberRaw)}
+                                                                className="text-neutral-400 hover:text-blue-600 transition-colors"
+                                                                title="Copy unmasked PAN"
+                                                            >
+                                                                {copiedPan === panNumberRaw ? (
+                                                                    <CheckCheck className="h-3 w-3 text-emerald-600" />
+                                                                ) : (
+                                                                    <Copy className="h-3 w-3" />
+                                                                )}
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {batch.upi_id ? (
+                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                            <span className="text-[11px] font-mono text-neutral-600 dark:text-neutral-400 block truncate max-w-[130px]" title={batch.upi_id}>
+                                                                {batch.upi_id}
+                                                            </span>
+                                                            {batch.upi_app && (
+                                                                <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 border font-medium ${getUpiAppBadgeClass(batch.upi_app)}`}>
+                                                                    {batch.upi_app}
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-[11px] text-neutral-400 block">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-3">
+                                                    <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                                                        {formatInr(appAmount)}
+                                                    </span>
+                                                    <span className="text-[11px] text-neutral-400 block">
+                                                        {batch.application_count} lot(s) ({batch.application_count * (ipo.lot_size || 1)} sh)
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 px-3 font-semibold text-emerald-600">
+                                                    ₹{batch.gmp_snapshot || ipo.gmp || 0}
+                                                </td>
+                                                <td className="py-3 px-3">
+                                                    {batch.profit_sharing_type === 'percentage' ? (
+                                                        <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200">
+                                                            {batch.profit_sharing_value}% of Listing Gain
+                                                        </Badge>
+                                                    ) : batch.profit_sharing_type === 'fix' ? (
+                                                        <Badge variant="secondary" className="text-[10px] bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200">
+                                                            Fixed ₹{batch.profit_sharing_value || batch.expected_user_payout}
+                                                        </Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="text-[10px]">
+                                                            Rate ₹{batch.published_rate_snapshot}
+                                                        </Badge>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-3">
+                                                    <span className="font-medium text-emerald-600 dark:text-emerald-400 block">
+                                                        {isAdmin ? 'Payout: ' : 'Your Payout: '}
+                                                        {formatInr(isAllotted ? (batch.settled_user_payout ?? batch.expected_user_payout) : isNotAllotted ? 0 : batch.expected_user_payout)}
+                                                    </span>
+                                                    {isAdmin && (
+                                                        <span className="text-[11px] text-neutral-400 block">
+                                                            Admin Net: {formatInr(isAllotted ? (batch.settled_net_earnings ?? batch.expected_net_earnings) : isNotAllotted ? 0 : batch.expected_net_earnings)}
+                                                        </span>
+                                                    )}
+                                                    {!isAdmin && isPending && (
+                                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 block">
+                                                            Finalized Listing + T+1
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-3">
+                                                    <div className="space-y-1">
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[10px] uppercase font-semibold ${
+                                                                isAllotted
+                                                                    ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                                                    : isNotAllotted
+                                                                    ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                                                                    : isPendingApproval
+                                                                    ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                                                                    : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                                                            }`}
+                                                        >
+                                                            {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : (batch.application_status.replace('_', ' '))}
+                                                        </Badge>
+
+                                                        {/* KFintech Scraped Info */}
+                                                        {batch.allotment_details && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAllotmentBatch(batch);
+                                                                    setAllotmentResult({
+                                                                        success: true,
+                                                                        found: true,
+                                                                        allotted: batch.allotment_details?.allotted,
+                                                                        all_shares: batch.allotment_details?.allotted_shares,
+                                                                        app_shares: batch.allotment_details?.applied_shares,
+                                                                        application_number: batch.allotment_details?.application_number,
+                                                                        name_from_pan: batch.allotment_details?.name_from_pan,
+                                                                        dp_clid: batch.allotment_details?.dp_clid,
+                                                                        pan_masked: batch.allotment_details?.pan_masked,
+                                                                        pan_full: panNumberRaw || undefined,
+                                                                        kfin_ipo_name: batch.allotment_details?.kfin_ipo_name,
+                                                                        checked_at: batch.allotment_details?.checked_at,
+                                                                    });
+                                                                    setAllotmentModalOpen(true);
+                                                                }}
+                                                                className="block text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-medium"
+                                                            >
+                                                                KFintech Details ↗
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="py-3 px-3 text-right">
+                                                    <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                                        {/* Approval controls for admin */}
+                                                        {isPendingApproval && isAdmin && (
+                                                            <>
+                                                                <Button
+                                                                    size="sm"
+                                                                    onClick={() => handleApprove(batch.id)}
+                                                                    className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                                                                    title="Approve Fixed Application"
+                                                                >
+                                                                    <Check className="h-3 w-3 mr-1" /> Approve
+                                                                </Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => handleReject(batch.id)}
+                                                                    className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                                                    title="Reject Fixed Application"
+                                                                >
+                                                                    <X className="h-3 w-3 mr-1" /> Reject
+                                                                </Button>
+                                                            </>
+                                                        )}
+
+                                                        {/* KFintech Allotment Check Button (Only visible when allotment date is present and reached) */}
+                                                        {showAllotmentButton && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant={isBatchAllotmentToday ? 'default' : 'outline'}
+                                                                onClick={() => handleCheckAllotment(batch)}
+                                                                className={`h-7 px-2.5 text-xs font-semibold ${
+                                                                    isBatchAllotmentToday
+                                                                        ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
+                                                                        : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
+                                                                }`}
+                                                                title={isBatchAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : `Check KFintech allotment status (Allotment: ${formatIstDate(allotmentDateStr)})`}
+                                                            >
+                                                                <Search className={`h-3 w-3 mr-1 ${isBatchAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
+                                                            </Button>
+                                                        )}
+
+                                                        {isPending && (
+                                                            <>
+                                                                <Button
+                                                                    size="sm"
+                                                                    onClick={() => handleStatusChange(batch.id, 'allotted')}
+                                                                    className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                                                                    title="Mark Allotted (Auto-records profit & returns capital)"
+                                                                >
+                                                                    <Check className="h-3 w-3 mr-1" /> Allotted
+                                                                </Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => handleStatusChange(batch.id, 'not_allotted')}
+                                                                    className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800"
+                                                                    title="Mark Not Allotted (Refunds capital with ₹0 profit)"
+                                                                >
+                                                                    <X className="h-3 w-3 mr-1" /> Not Allotted
+                                                                </Button>
+                                                            </>
+                                                        )}
+
+                                                        {isAllotted && (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold inline-flex items-center bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800">
+                                                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Allotted
+                                                                </span>
+                                                                {!hasAutoCheckResult && (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="ghost"
+                                                                        className="h-6 px-1.5 text-[10px] text-neutral-400 hover:text-neutral-600"
+                                                                        onClick={() => handleStatusChange(batch.id, 'ready')}
+                                                                        title="Re-open status"
+                                                                    >
+                                                                        Undo
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {isNotAllotted && (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className="text-xs text-rose-700 dark:text-rose-300 font-semibold inline-flex items-center bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded border border-rose-300 dark:border-rose-800">
+                                                                    <X className="h-3.5 w-3.5 mr-1 text-rose-600" /> Not Allotted
+                                                                </span>
+                                                                {!hasAutoCheckResult && (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="ghost"
+                                                                        className="h-6 px-1.5 text-[10px] text-neutral-400 hover:text-neutral-600"
+                                                                        onClick={() => handleStatusChange(batch.id, 'ready')}
+                                                                        title="Re-open status"
+                                                                    >
+                                                                        Undo
+                                                                    </Button>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {isAdmin && batch.settlement_status !== 'settled' && !isPending && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="h-7 text-xs border-emerald-600 text-emerald-600 ml-1"
+                                                                onClick={() => openSettlementModal(batch)}
+                                                            >
+                                                                Adjust
+                                                            </Button>
+                                                        )}
+
+                                                        {/* Edit Application Button (Admin Only) */}
+                                                        {isAdmin && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-7 text-xs px-2 text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-50"
+                                                                onClick={() => setEditingBatch(batch)}
+                                                                title="Edit Application (Rates, PAN, Details)"
+                                                            >
+                                                                <Edit3 className="h-3 w-3 mr-1 text-blue-600" /> Edit
+                                                            </Button>
+                                                        )}
+
+                                                        {/* Delete Application Button */}
+                                                        {(isAdmin || batch.settlement_status !== 'settled') && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="text-neutral-400 hover:text-red-600 h-7 text-xs px-1.5"
+                                                                onClick={() => setDeletingBatch(batch)}
+                                                                title="Delete Application"
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+
                     return (
                         <Card>
                             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3">
@@ -1426,347 +1942,176 @@ export default function IpoShow({
                                         </Button>
                                     </div>
                                 ) : (
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-left text-sm">
-                                            <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800">
-                                                <tr>
-                                                    <th className="py-3 px-3">Applicant & Batch</th>
-                                                    <th className="py-3 px-3">Bank</th>
-                                                    <th className="py-3 px-3">PAN & UPI</th>
-                                                    <th className="py-3 px-3">IPO Amount</th>
-                                                    <th className="py-3 px-3">Current GMP</th>
-                                                    <th className="py-3 px-3">Profit Sharing</th>
-                                                    <th className="py-3 px-3">Est. Payout / Net</th>
-                                                    <th className="py-3 px-3">Status</th>
-                                                    <th className="py-3 px-3 text-right">Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                                                {batches.map((batch) => {
-                                                    const pans = batch.batch_pans || [];
-                                                    const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
-                                                    const panDisplay = panNumberRaw
-                                                        ? (isAdmin ? panNumberRaw : `XXXXXX${panNumberRaw.slice(-4)}`)
-                                                        : 'No PAN';
-
-                                                    const locallyChecked = checkedBatchIds[batch.id];
-                                                    const hasAutoCheckResult = Boolean(
-                                                        batch.allotment_details ||
-                                                        batch.allotment_checked_at ||
-                                                        locallyChecked
-                                                    );
-
-                                                    const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (batch.allotment_details?.allotted || locallyChecked?.allotted));
-                                                    const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!batch.allotment_details?.allotted && !locallyChecked?.allotted));
-                                                    const isPendingApproval = batch.application_status === 'pending_approval' || batch.application_status === 'submitted';
-                                                    const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval && !hasAutoCheckResult;
-
-                                                const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
-
-                                                const hasAllotmentDate = Boolean(batch.ipo?.allotment_date || ipo.allotment_date);
-                                                const allotmentDateStr = (batch.ipo?.allotment_date || ipo.allotment_date)?.split('T')[0] ?? null;
-                                                const isAllotmentDateReached = Boolean(allotmentDateStr && todayIst >= allotmentDateStr);
-                                                const isBatchAllotmentToday = Boolean(allotmentDateStr && allotmentDateStr === todayIst);
-                                                const showAllotmentButton = Boolean(
-                                                    panNumberRaw &&
-                                                    batch.application_status !== 'cancelled' &&
-                                                    hasAllotmentDate &&
-                                                    (isAllotmentDateReached || isAdmin)
-                                                );
-
-                                                return (
-                                                    <tr
-                                                        key={batch.id}
-                                                        className={`transition-colors ${
-                                                            isBatchAllotmentToday
-                                                                ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70 border-l-4 border-l-amber-500'
-                                                                : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
+                                    <>
+                                        {/* Toolbar: Admin Sub-Tabs & Live Search with 5s delay */}
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-3 mb-4">
+                                            {/* Admin Sub-Tabs */}
+                                            {isAdmin ? (
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setAdminAppsSubTab('all')}
+                                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                                            adminAppsSubTab === 'all'
+                                                                ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs'
+                                                                : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200/80 dark:bg-neutral-800 dark:text-neutral-300'
                                                         }`}
                                                     >
-                                                        <td className="py-3 px-3">
-                                                            <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
-                                                                {batch.applicant_name || batch.user?.name || 'Applicant'}
-                                                            </span>
-                                                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                                                <span className="font-mono text-[11px] text-neutral-400">
-                                                                    {batch.batch_number} · {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
-                                                                </span>
-                                                                {isBatchAllotmentToday ? (
-                                                                    <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-4">
-                                                                        <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Allotment Today
-                                                                    </Badge>
-                                                                ) : hasAllotmentDate ? (
-                                                                    <span className="text-[10px] text-neutral-400 font-sans">
-                                                                        Allotment: {formatIstDate(allotmentDateStr)}
-                                                                    </span>
-                                                                ) : null}
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-3 px-3">
-                                                            {batch.bank_name ? (
-                                                                <span className="inline-flex items-center gap-1 font-medium text-xs text-neutral-700 dark:text-neutral-300">
-                                                                    <Landmark className="h-3.5 w-3.5 text-blue-500" />
-                                                                    {batch.bank_name}
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-xs text-neutral-400">—</span>
-                                                            )}
-                                                        </td>
-                                                        <td className="py-3 px-3">
-                                                            <div className="flex items-center gap-1.5 font-mono text-xs font-medium text-neutral-800 dark:text-neutral-200">
-                                                                <span>{panDisplay}</span>
-                                                                {isAdmin && panNumberRaw && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => copyPan(panNumberRaw)}
-                                                                        className="text-neutral-400 hover:text-blue-600 transition-colors"
-                                                                        title="Copy unmasked PAN"
-                                                                    >
-                                                                        {copiedPan === panNumberRaw ? (
-                                                                            <CheckCheck className="h-3 w-3 text-emerald-600" />
-                                                                        ) : (
-                                                                            <Copy className="h-3 w-3" />
-                                                                        )}
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                            {batch.upi_id ? (
-                                                                <div className="flex items-center gap-1.5 mt-0.5">
-                                                                    <span className="text-[11px] font-mono text-neutral-600 dark:text-neutral-400 block truncate max-w-[130px]" title={batch.upi_id}>
-                                                                        {batch.upi_id}
-                                                                    </span>
-                                                                    {batch.upi_app && (
-                                                                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 border font-medium ${getUpiAppBadgeClass(batch.upi_app)}`}>
-                                                                            {batch.upi_app}
+                                                        <FileText className="h-3.5 w-3.5" />
+                                                        All ({filteredBatches.length}{appliedAppsSearch ? `/${batches.length}` : ''})
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setAdminAppsSubTab('grouped')}
+                                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                                            adminAppsSubTab === 'grouped'
+                                                                ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs'
+                                                                : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200/80 dark:bg-neutral-800 dark:text-neutral-300'
+                                                        }`}
+                                                    >
+                                                        <Users className="h-3.5 w-3.5" />
+                                                        Grouped ({groupedByUser.length})
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-neutral-500 font-medium">
+                                                    Showing {filteredBatches.length} of {batches.length} application(s)
+                                                </span>
+                                            )}
+
+                                            {/* Live Search for everyone (Auto-searches after 5s typing delay without enter) */}
+                                            <div className="relative flex-1 max-w-sm sm:ml-auto">
+                                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" />
+                                                <Input
+                                                    placeholder="Live search PAN, applicant, batch #, bank..."
+                                                    value={appsSearchInput}
+                                                    onChange={(e) => setAppsSearchInput(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            setAppliedAppsSearch(appsSearchInput);
+                                                            setSearchCountdown(null);
+                                                        }
+                                                    }}
+                                                    className="pl-8 pr-28 h-9 text-xs"
+                                                />
+                                                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                                                    {searchCountdown !== null && searchCountdown > 0 && (
+                                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                                                            {searchCountdown}s
+                                                        </span>
+                                                    )}
+                                                    {appsSearchInput && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setAppsSearchInput('');
+                                                                setAppliedAppsSearch('');
+                                                                setSearchCountdown(null);
+                                                            }}
+                                                            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+                                                            title="Clear search"
+                                                        >
+                                                            <X className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {filteredBatches.length === 0 ? (
+                                            <div className="py-10 text-center space-y-2">
+                                                <p className="text-sm text-neutral-500">
+                                                    No applications match "{appliedAppsSearch}".
+                                                </p>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => {
+                                                        setAppsSearchInput('');
+                                                        setAppliedAppsSearch('');
+                                                        setSearchCountdown(null);
+                                                    }}
+                                                    className="text-xs"
+                                                >
+                                                    Clear Search Filter
+                                                </Button>
+                                            </div>
+                                        ) : isAdmin && adminAppsSubTab === 'grouped' ? (
+                                            /* GROUPED BY USERS VIEW */
+                                            <div className="space-y-4">
+                                                {groupedByUser.map((group) => {
+                                                    const isExpanded = expandedUserGroups[group.userId] !== false;
+                                                    return (
+                                                        <div
+                                                            key={group.userId}
+                                                            className="rounded-xl border border-neutral-200/90 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-2xs"
+                                                        >
+                                                            <div
+                                                                className="flex flex-col md:flex-row md:items-center justify-between p-4 cursor-pointer hover:bg-neutral-50/70 dark:hover:bg-neutral-800/40 transition-colors gap-3 border-b border-neutral-100 dark:border-neutral-800"
+                                                                onClick={() => toggleUserGroup(group.userId)}
+                                                            >
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="h-9 w-9 rounded-full bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
+                                                                        {group.userName.charAt(0).toUpperCase()}
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                                            <h4 className="font-semibold text-neutral-900 dark:text-neutral-100 text-sm">
+                                                                                {group.userName}
+                                                                            </h4>
+                                                                            <span className="text-xs text-neutral-400 font-mono">({group.userEmail})</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2 mt-1 flex-wrap text-xs text-neutral-500">
+                                                                            <span className="font-medium text-neutral-700 dark:text-neutral-300">
+                                                                                {group.totalApplications} apps ({group.totalLots} lots)
+                                                                            </span>
+                                                                            <span>•</span>
+                                                                            <span>Capital: <strong className="text-neutral-900 dark:text-neutral-100">{formatInr(group.totalCapital)}</strong></span>
+                                                                            <span>•</span>
+                                                                            <span>User Payout: <strong className="text-emerald-600">{formatInr(group.totalUserPayout)}</strong></span>
+                                                                            <span>•</span>
+                                                                            <span>Admin Margin: <strong className="text-purple-600">{formatInr(group.totalAdminMargin)}</strong></span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="flex items-center gap-2 shrink-0">
+                                                                    {group.allottedCount > 0 && (
+                                                                        <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[10px]">
+                                                                            {group.allottedCount} Allotted
                                                                         </Badge>
                                                                     )}
-                                                                </div>
-                                                            ) : (
-                                                                <span className="text-[11px] text-neutral-400 block">—</span>
-                                                            )}
-                                                        </td>
-                                                        <td className="py-3 px-3">
-                                                            <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                                                                {formatInr(appAmount)}
-                                                            </span>
-                                                            <span className="text-[11px] text-neutral-400 block">
-                                                                {batch.application_count} lot(s) ({batch.application_count * (ipo.lot_size || 1)} sh)
-                                                            </span>
-                                                        </td>
-                                                        <td className="py-3 px-3 font-semibold text-emerald-600">
-                                                            ₹{batch.gmp_snapshot || ipo.gmp || 0}
-                                                        </td>
-                                                        <td className="py-3 px-3">
-                                                            {batch.profit_sharing_type === 'percentage' ? (
-                                                                <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200">
-                                                                    {batch.profit_sharing_value}% of Listing Gain
-                                                                </Badge>
-                                                            ) : batch.profit_sharing_type === 'fix' ? (
-                                                                <Badge variant="secondary" className="text-[10px] bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200">
-                                                                    Fixed ₹{batch.profit_sharing_value || batch.expected_user_payout}
-                                                                </Badge>
-                                                            ) : (
-                                                                <Badge variant="outline" className="text-[10px]">
-                                                                    Rate ₹{batch.published_rate_snapshot}
-                                                                </Badge>
-                                                            )}
-                                                        </td>
-                                                        <td className="py-3 px-3">
-                                                            <span className="font-medium text-emerald-600 dark:text-emerald-400 block">
-                                                                {isAdmin ? 'Payout: ' : 'Your Payout: '}
-                                                                {formatInr(isAllotted ? (batch.settled_user_payout ?? batch.expected_user_payout) : isNotAllotted ? 0 : batch.expected_user_payout)}
-                                                            </span>
-                                                            {isAdmin && (
-                                                                <span className="text-[11px] text-neutral-400 block">
-                                                                    Admin Net: {formatInr(isAllotted ? (batch.settled_net_earnings ?? batch.expected_net_earnings) : isNotAllotted ? 0 : batch.expected_net_earnings)}
-                                                                </span>
-                                                            )}
-                                                            {!isAdmin && isPending && (
-                                                                <span className="text-[10px] text-amber-600 dark:text-amber-400 block">
-                                                                    Finalized Listing + T+1
-                                                                </span>
-                                                            )}
-                                                        </td>
-                                                        <td className="py-3 px-3">
-                                                            <div className="space-y-1">
-                                                                <Badge
-                                                                    variant="outline"
-                                                                    className={`text-[10px] uppercase font-semibold ${
-                                                                        isAllotted
-                                                                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                                                            : isNotAllotted
-                                                                            ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                                                                            : isPendingApproval
-                                                                            ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                                                                            : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                                                                    }`}
-                                                                >
-                                                                    {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : (batch.application_status.replace('_', ' '))}
-                                                                </Badge>
-
-                                                                {/* KFintech Scraped Info */}
-                                                                {batch.allotment_details && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            setAllotmentBatch(batch);
-                                                                            setAllotmentResult({
-                                                                                success: true,
-                                                                                found: true,
-                                                                                allotted: batch.allotment_details?.allotted,
-                                                                                all_shares: batch.allotment_details?.allotted_shares,
-                                                                                app_shares: batch.allotment_details?.applied_shares,
-                                                                                application_number: batch.allotment_details?.application_number,
-                                                                                name_from_pan: batch.allotment_details?.name_from_pan,
-                                                                                dp_clid: batch.allotment_details?.dp_clid,
-                                                                                pan_masked: batch.allotment_details?.pan_masked,
-                                                                                pan_full: panNumberRaw || undefined,
-                                                                                kfin_ipo_name: batch.allotment_details?.kfin_ipo_name,
-                                                                                checked_at: batch.allotment_details?.checked_at,
-                                                                            });
-                                                                            setAllotmentModalOpen(true);
-                                                                        }}
-                                                                        className="block text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-medium"
-                                                                    >
-                                                                        KFintech Details ↗
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-3 px-3 text-right">
-                                                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                                                                {/* Approval controls for admin */}
-                                                                {isPendingApproval && isAdmin && (
-                                                                    <>
-                                                                        <Button
-                                                                            size="sm"
-                                                                            onClick={() => handleApprove(batch.id)}
-                                                                            className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
-                                                                            title="Approve Fixed Application"
-                                                                        >
-                                                                            <Check className="h-3 w-3 mr-1" /> Approve
-                                                                        </Button>
-                                                                        <Button
-                                                                            size="sm"
-                                                                            variant="outline"
-                                                                            onClick={() => handleReject(batch.id)}
-                                                                            className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
-                                                                            title="Reject Fixed Application"
-                                                                        >
-                                                                            <X className="h-3 w-3 mr-1" /> Reject
-                                                                        </Button>
-                                                                    </>
-                                                                )}
-
-                                                                {/* KFintech Allotment Check Button (Only visible when allotment date is present and reached) */}
-                                                                {showAllotmentButton && (
+                                                                    {group.pendingApprovalCount > 0 && (
+                                                                        <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 text-[10px]">
+                                                                            {group.pendingApprovalCount} Pending Approval
+                                                                        </Badge>
+                                                                    )}
                                                                     <Button
-                                                                        size="sm"
-                                                                        variant={isBatchAllotmentToday ? 'default' : 'outline'}
-                                                                        onClick={() => handleCheckAllotment(batch)}
-                                                                        className={`h-7 px-2.5 text-xs font-semibold ${
-                                                                            isBatchAllotmentToday
-                                                                                ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
-                                                                                : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
-                                                                        }`}
-                                                                        title={isBatchAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : `Check KFintech allotment status (Allotment: ${formatIstDate(allotmentDateStr)})`}
-                                                                    >
-                                                                        <Search className={`h-3 w-3 mr-1 ${isBatchAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
-                                                                    </Button>
-                                                                )}
-
-                                                                {isPending && (
-                                                                    <>
-                                                                        <Button
-                                                                            size="sm"
-                                                                            onClick={() => handleStatusChange(batch.id, 'allotted')}
-                                                                            className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
-                                                                            title="Mark Allotted (Auto-records profit & returns capital)"
-                                                                        >
-                                                                            <Check className="h-3 w-3 mr-1" /> Allotted
-                                                                        </Button>
-                                                                        <Button
-                                                                            size="sm"
-                                                                            variant="outline"
-                                                                            onClick={() => handleStatusChange(batch.id, 'not_allotted')}
-                                                                            className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800"
-                                                                            title="Mark Not Allotted (Refunds capital with ₹0 profit)"
-                                                                        >
-                                                                            <X className="h-3 w-3 mr-1" /> Not Allotted
-                                                                        </Button>
-                                                                    </>
-                                                                )}
-
-                                                                {isAllotted && (
-                                                                    <div className="flex items-center gap-1.5">
-                                                                        <span className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold inline-flex items-center bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800">
-                                                                            <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Allotted
-                                                                        </span>
-                                                                        {!hasAutoCheckResult && (
-                                                                            <Button
-                                                                                size="sm"
-                                                                                variant="ghost"
-                                                                                className="h-6 px-1.5 text-[10px] text-neutral-400 hover:text-neutral-600"
-                                                                                onClick={() => handleStatusChange(batch.id, 'ready')}
-                                                                                title="Re-open status"
-                                                                            >
-                                                                                Undo
-                                                                            </Button>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-
-                                                                {isNotAllotted && (
-                                                                    <div className="flex items-center gap-1.5">
-                                                                        <span className="text-xs text-rose-700 dark:text-rose-300 font-semibold inline-flex items-center bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded border border-rose-300 dark:border-rose-800">
-                                                                            <X className="h-3.5 w-3.5 mr-1 text-rose-600" /> Not Allotted
-                                                                        </span>
-                                                                        {!hasAutoCheckResult && (
-                                                                            <Button
-                                                                                size="sm"
-                                                                                variant="ghost"
-                                                                                className="h-6 px-1.5 text-[10px] text-neutral-400 hover:text-neutral-600"
-                                                                                onClick={() => handleStatusChange(batch.id, 'ready')}
-                                                                                title="Re-open status"
-                                                                            >
-                                                                                Undo
-                                                                            </Button>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-
-                                                                {isAdmin && batch.settlement_status !== 'settled' && !isPending && (
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="outline"
-                                                                        className="h-7 text-xs border-emerald-600 text-emerald-600 ml-1"
-                                                                        onClick={() => openSettlementModal(batch)}
-                                                                    >
-                                                                        Adjust
-                                                                    </Button>
-                                                                )}
-
-                                                                {/* Delete Application Button */}
-                                                                {(isAdmin || batch.settlement_status !== 'settled') && (
-                                                                    <Button
-                                                                        size="sm"
                                                                         variant="ghost"
-                                                                        className="text-neutral-400 hover:text-red-600 h-7 text-xs px-1.5"
-                                                                        onClick={() => setDeletingBatch(batch)}
-                                                                        title="Delete Application"
+                                                                        size="sm"
+                                                                        className="h-8 w-8 p-0 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
                                                                     >
-                                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                                        {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                                                     </Button>
-                                                                )}
+                                                                </div>
                                                             </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
+
+                                                            {isExpanded && (
+                                                                <div className="p-2 sm:p-3 bg-neutral-50/30 dark:bg-neutral-950/20">
+                                                                    {renderBatchesTable(group.batches)}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            /* ALL APPLICATIONS FLAT VIEW */
+                                            renderBatchesTable(filteredBatches)
+                                        )}
+                                    </>
+                                )}
                         </CardContent>
                     </Card>
                 );
@@ -3482,6 +3827,17 @@ export default function IpoShow({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            {/* Edit Application Modal (Admin Only) */}
+            <EditApplicationModal
+                isOpen={Boolean(editingBatch)}
+                onClose={() => setEditingBatch(null)}
+                batch={editingBatch}
+                userPans={userPans}
+                bankAccounts={bankAccounts}
+                userUpis={userUpis}
+                ipo={ipo}
+                isAdmin={isAdmin}
+            />
         </AppLayout>
     );
 }

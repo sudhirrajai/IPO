@@ -56,3 +56,17 @@ export function formatIstDateTime(dateStr?: string | null): string {
         hour12: true,
     }).format(date);
 }
+
+/**
+ * Format number or numeric string as Indian Rupee currency.
+ */
+export function formatInr(value?: number | string | null): string {
+    if (value === undefined || value === null || value === '') return '₹0';
+    const num = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(num)) return '₹0';
+    return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        maximumFractionDigits: 0,
+    }).format(num);
+}

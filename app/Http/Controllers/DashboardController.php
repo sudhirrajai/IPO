@@ -29,6 +29,8 @@ class DashboardController extends Controller
 
     protected function adminDashboard(Request $request): Response
     {
+        $user = $request->user();
+
         // 1. User metrics
         $totalUsers = User::count();
         $activeUsers = User::where('status', 'active')->count();
@@ -103,6 +105,11 @@ class DashboardController extends Controller
                 'applications' => (int) $ipo->total_apps,
             ]);
 
+        $favoriteIposList = $user->favoriteIpos()
+            ->with('activeRate')
+            ->orderBy('open_date')
+            ->get();
+
         return Inertia::render('dashboard', [
             'metrics' => [
                 'totalUsers' => $totalUsers,
@@ -127,6 +134,7 @@ class DashboardController extends Controller
             'recentBatches' => $recentBatches,
             'recentRateChanges' => $recentRateChanges,
             'categorizedIpos' => [
+                'favorites' => $favoriteIposList,
                 'open' => $openIposList,
                 'upcoming' => $upcomingIposList,
                 'closed' => $closedIposList,
@@ -140,6 +148,7 @@ class DashboardController extends Controller
                 ],
             ],
         ]);
+
     }
 
     protected function userDashboard(Request $request, User $user): Response
@@ -186,6 +195,12 @@ class DashboardController extends Controller
             ->get();
         $closedIpos->each(fn ($i) => $i->activeRate?->makeHidden(['trader_rate', 'margin']));
 
+        $favoriteIpos = $user->favoriteIpos()
+            ->with('activeRate')
+            ->orderBy('open_date')
+            ->get();
+        $favoriteIpos->each(fn ($i) => $i->activeRate?->makeHidden(['trader_rate', 'margin']));
+
         return Inertia::render('user-dashboard', [
             'metrics' => [
                 'applicationCount' => $applicationCount,
@@ -196,6 +211,7 @@ class DashboardController extends Controller
             'recentBatches' => $recentBatches,
             'openIpos' => $openIpos,
             'categorizedIpos' => [
+                'favorites' => $favoriteIpos,
                 'open' => $openIpos,
                 'upcoming' => $upcomingIpos,
                 'closed' => $closedIpos,
@@ -203,3 +219,4 @@ class DashboardController extends Controller
         ]);
     }
 }
+

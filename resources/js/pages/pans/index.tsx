@@ -8,12 +8,15 @@ import {
     Eye,
     EyeOff,
     Filter,
+    LayoutGrid,
+    List,
     Plus,
     Search,
     ShieldAlert,
     ShieldCheck,
     Trash2,
 } from 'lucide-react';
+
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -65,11 +68,13 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
 
     const [search, setSearch] = useState(filters.search || '');
     const [selectedUser, setSelectedUser] = useState(filters.user_id || 'all');
+    const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
     // Modals
     const [isAddOpen, setIsAddOpen] = useState(false);
     const [editingPan, setEditingPan] = useState<UserPan | null>(null);
     const [deletingPan, setDeletingPan] = useState<UserPan | null>(null);
+
 
     // Revealed PAN numbers cache { panId: fullPanString }
     const [revealedPans, setRevealedPans] = useState<Record<number, string>>({});
@@ -282,9 +287,39 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                             </SelectContent>
                         </Select>
                     )}
+
+                    {/* View Mode Toggle: Table vs Cards */}
+                    <div className="inline-flex rounded-lg border border-neutral-200 dark:border-neutral-800 p-0.5 bg-neutral-50 dark:bg-neutral-900/50 ml-auto">
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('table')}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                                viewMode === 'table'
+                                    ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-50 shadow-xs'
+                                    : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400'
+                            }`}
+                            title="Compact Table View"
+                        >
+                            <List className="h-3.5 w-3.5" />
+                            <span>Table</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('cards')}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                                viewMode === 'cards'
+                                    ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-50 shadow-xs'
+                                    : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400'
+                            }`}
+                            title="Cards Grid View"
+                        >
+                            <LayoutGrid className="h-3.5 w-3.5" />
+                            <span>Cards</span>
+                        </button>
+                    </div>
                 </div>
 
-                {/* PAN Cards Grid */}
+                {/* PAN List Display: Table or Cards */}
                 {pans.data.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-neutral-300 p-12 text-center dark:border-neutral-700">
                         <CreditCard className="mx-auto h-8 w-8 text-neutral-400" />
@@ -294,8 +329,146 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                             Add PAN Now
                         </Button>
                     </div>
+                ) : viewMode === 'table' ? (
+                    /* COMPACT TABLE VIEW */
+                    <div className="rounded-xl border border-neutral-200/90 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-xs overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-800/50">
+                                    <tr>
+                                        <th className="py-3 px-4">Status</th>
+                                        <th className="py-3 px-4">PAN Number</th>
+                                        <th className="py-3 px-4">Account Holder</th>
+                                        <th className="py-3 px-4">Broker / Demat</th>
+                                        {isAdmin && <th className="py-3 px-4">Owner</th>}
+                                        <th className="py-3 px-4">Notes</th>
+                                        <th className="py-3 px-4 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                                    {pans.data.map((pan) => {
+                                        const isRevealed = Boolean(revealedPans[pan.id]);
+                                        const displayedPan = isRevealed ? revealedPans[pan.id] : pan.masked_pan;
+
+                                        return (
+                                            <tr key={pan.id} className="hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40 transition-colors">
+                                                <td className="py-3 px-4">
+                                                    <Badge
+                                                        variant={pan.status === 'active' ? 'default' : 'secondary'}
+                                                        className={`text-[10px] capitalize font-semibold ${
+                                                            pan.status === 'active'
+                                                                ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                                                                : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                                                        }`}
+                                                    >
+                                                        {pan.status === 'active' && (
+                                                            <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                        )}
+                                                        {pan.status}
+                                                    </Badge>
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="font-mono text-sm font-bold tracking-wider text-neutral-900 dark:text-neutral-100">
+                                                            {displayedPan}
+                                                        </span>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                                                            onClick={() => handleReveal(pan)}
+                                                            disabled={revealingId === pan.id}
+                                                            title={isRevealed ? 'Hide PAN' : 'Reveal full PAN'}
+                                                        >
+                                                            {isRevealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                                        </Button>
+                                                        {isRevealed && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-6 w-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                                                                onClick={() => handleCopy(pan.id, revealedPans[pan.id])}
+                                                                title="Copy PAN"
+                                                            >
+                                                                {copiedId === pan.id ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    <span className="font-semibold text-neutral-900 dark:text-neutral-100 block">
+                                                        {pan.account_holder_name || 'N/A'}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    <span className="text-xs text-neutral-600 dark:text-neutral-300 font-medium">
+                                                        {pan.broker_name || 'Generic'}
+                                                    </span>
+                                                </td>
+                                                {isAdmin && (
+                                                    <td className="py-3 px-4">
+                                                        <span className="text-xs text-neutral-700 dark:text-neutral-300 font-medium">
+                                                            {pan.user?.name || '—'}
+                                                        </span>
+                                                    </td>
+                                                )}
+                                                <td className="py-3 px-4">
+                                                    {pan.notes ? (
+                                                        <span className="text-xs text-neutral-500 italic max-w-[180px] truncate block" title={pan.notes}>
+                                                            "{pan.notes}"
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-neutral-400 text-xs">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-4 text-right">
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className={`h-7 px-2 text-xs ${
+                                                                pan.status === 'active'
+                                                                    ? 'text-neutral-500 hover:text-amber-600'
+                                                                    : 'text-emerald-600 hover:text-emerald-700'
+                                                            }`}
+                                                            onClick={() => handleToggleStatus(pan)}
+                                                            title={pan.status === 'active' ? 'Deactivate PAN' : 'Activate PAN'}
+                                                        >
+                                                            {pan.status === 'active' ? 'Deactivate' : 'Activate'}
+                                                        </Button>
+
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 px-2 text-xs text-neutral-700 hover:text-neutral-900 dark:text-neutral-300"
+                                                            onClick={() => handleOpenEdit(pan)}
+                                                            title="Edit PAN details"
+                                                        >
+                                                            <Edit2 className="h-3 w-3 mr-1" /> Edit
+                                                        </Button>
+
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 px-1.5 text-xs text-neutral-400 hover:text-red-600"
+                                                            onClick={() => setDeletingPan(pan)}
+                                                            title="Delete PAN"
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 ) : (
+                    /* CARDS GRID VIEW */
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+
                         {pans.data.map((pan) => {
                             const isRevealed = Boolean(revealedPans[pan.id]);
                             const displayedPan = isRevealed ? revealedPans[pan.id] : pan.masked_pan;
