@@ -45,6 +45,8 @@ class ApplicationBatch extends Model
         'trader_reference',
         'submission_date',
         'notes',
+        'allotment_details',
+        'allotment_checked_at',
         'created_by_user_id',
     ];
 
@@ -68,6 +70,8 @@ class ApplicationBatch extends Model
             'settled_net_earnings' => 'decimal:2',
             'capital_returned' => 'decimal:2',
             'submission_date' => 'date:Y-m-d',
+            'allotment_details' => 'array',
+            'allotment_checked_at' => 'datetime',
         ];
     }
 

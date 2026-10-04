@@ -29,11 +29,15 @@ class Ipo extends Model
         'min_retail_qty',
         'issue_size',
         'gmp',
+        'accept_fix_applications',
+        'auto_approve_fix',
         'status',
         'provider',
         'provider_id',
+        'kfin_client_id',
         'raw_provider_data',
         'last_synced_at',
+        'allotment_scraped_at',
     ];
 
     protected $appends = [
@@ -120,10 +124,13 @@ class Ipo extends Model
             'issue_price' => 'decimal:2',
             'issue_size' => 'decimal:2',
             'gmp' => 'decimal:2',
+            'accept_fix_applications' => 'boolean',
+            'auto_approve_fix' => 'boolean',
             'lot_size' => 'integer',
             'min_retail_qty' => 'integer',
             'raw_provider_data' => 'array',
             'last_synced_at' => 'datetime',
+            'allotment_scraped_at' => 'datetime',
         ];
     }
 

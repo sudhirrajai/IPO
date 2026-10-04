@@ -249,4 +249,38 @@ class IpoController extends Controller
 
         return redirect()->route('ipos.index')->with('success', 'IPO marked as closed.');
     }
+
+    public function toggleFixApplications(Ipo $ipo): RedirectResponse
+    {
+        $ipo->accept_fix_applications = ! ($ipo->accept_fix_applications ?? true);
+        $ipo->save();
+
+        $state = $ipo->accept_fix_applications ? 'enabled' : 'disabled';
+        AuditService::log('ipo_fix_toggle', $ipo, null, ['accept_fix_applications' => $ipo->accept_fix_applications], "Accepting fix rate applications is now {$state}");
+
+        return back()->with('success', "Accepting fix rate applications is now {$state} for {$ipo->company_name}.");
+    }
+
+    public function toggleAutoApproveFix(Ipo $ipo): RedirectResponse
+    {
+        $ipo->auto_approve_fix = ! ($ipo->auto_approve_fix ?? true);
+        $ipo->save();
+
+        $state = $ipo->auto_approve_fix ? 'enabled' : 'disabled';
+        AuditService::log('ipo_auto_approve_toggle', $ipo, null, ['auto_approve_fix' => $ipo->auto_approve_fix], "Auto-approval for fix applications is now {$state}");
+
+        return back()->with('success', "Auto-approval for fix rate applications is now {$state} for {$ipo->company_name}.");
+    }
+
+    public function checkAllotments(Ipo $ipo): RedirectResponse
+    {
+        \Illuminate\Support\Facades\Artisan::call('ipo:check-allotment', [
+            '--ipo_id' => $ipo->id,
+            '--force' => true,
+        ]);
+
+        $output = trim(\Illuminate\Support\Facades\Artisan::output());
+
+        return back()->with('success', "Allotment check completed: {$output}");
+    }
 }

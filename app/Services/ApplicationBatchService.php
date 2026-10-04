@@ -62,6 +62,10 @@ class ApplicationBatchService
         $expectedListingGain = round($lotSize * $gmpSnapshot * $count, 2);
 
         if ($profitSharingType === 'fix') {
+            if (! $isAdmin && ! ($ipo->accept_fix_applications ?? true)) {
+                throw new InvalidArgumentException("Fixed rate applications are currently paused by the admin for {$ipo->company_name}. Please choose another profit sharing model.");
+            }
+
             // Flat profit sharing payout decided
             $userPayout = round($profitSharingValue * $count, 2);
             $grossProfit = $expectedListingGain > 0 ? $expectedListingGain : round($userPayout, 2);
@@ -208,7 +212,7 @@ class ApplicationBatchService
                 'expected_gross_profit' => $grossProfit,
                 'expected_user_payout' => $userPayout,
                 'expected_net_earnings' => $netEarnings,
-                'application_status' => $data['application_status'] ?? 'ready',
+                'application_status' => $data['application_status'] ?? (($profitSharingType === 'fix' && ! ($ipo->auto_approve_fix ?? true) && ! Auth::user()?->isAdmin()) ? 'pending_approval' : 'confirmed'),
                 'settlement_status' => 'estimated',
                 'trader_reference' => $data['trader_reference'] ?? null,
                 'submission_date' => $data['submission_date'] ?? now()->format('Y-m-d'),

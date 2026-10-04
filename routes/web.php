@@ -29,6 +29,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/applications', [ApplicationBatchController::class, 'index'])->name('applications.index');
     Route::post('/applications', [ApplicationBatchController::class, 'store'])->name('applications.store');
     Route::post('/applications/{batch}/cancel', [ApplicationBatchController::class, 'cancel'])->name('applications.cancel');
+    Route::delete('/applications/{batch}', [ApplicationBatchController::class, 'destroy'])->name('applications.destroy');
+    Route::post('/applications/{batch}/check-allotment', [ApplicationBatchController::class, 'checkAllotment'])->name('applications.check-allotment');
+    Route::post('/applications/{batch}/approve', [ApplicationBatchController::class, 'approve'])->name('applications.approve');
+    Route::post('/applications/{batch}/reject', [ApplicationBatchController::class, 'reject'])->name('applications.reject');
 
     // PAN Registry
     Route::get('/pans', [UserPanController::class, 'index'])->name('pans.index');
@@ -57,6 +61,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/ipos', [IpoController::class, 'store'])->name('ipos.store');
         Route::put('/ipos/{ipo}', [IpoController::class, 'update'])->name('ipos.update');
         Route::delete('/ipos/{ipo}', [IpoController::class, 'destroy'])->name('ipos.destroy');
+        Route::post('/ipos/{ipo}/toggle-fix', [IpoController::class, 'toggleFixApplications'])->name('ipos.toggle-fix');
+        Route::post('/ipos/{ipo}/toggle-auto-approve-fix', [IpoController::class, 'toggleAutoApproveFix'])->name('ipos.toggle-auto-approve-fix');
+        Route::post('/ipos/{ipo}/check-allotments', [IpoController::class, 'checkAllotments'])->name('ipos.check-allotments');
 
         // Rates
         Route::post('/ipos/{ipo}/rates', [IpoRateController::class, 'store'])->name('ipos.rates.store');

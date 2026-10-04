@@ -7,6 +7,7 @@ import {
     Calculator,
     Calendar,
     Check,
+    CheckCheck,
     CheckCircle2,
     Clock,
     Copy,
@@ -23,8 +24,15 @@ import {
     Percent,
     PieChart,
     Plus,
+    RefreshCw,
+    Search,
     Settings,
+    ShieldAlert,
+    ShieldCheck,
     Smartphone,
+    Sparkles,
+    ToggleLeft,
+    ToggleRight,
     Trash2,
     TrendingUp,
     Users,
@@ -32,6 +40,7 @@ import {
     X,
 } from 'lucide-react';
 import { useState } from 'react';
+import KfintechAllotmentModal, { type AllotmentResultData } from '@/components/kfintech-allotment-modal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -152,6 +161,93 @@ export default function IpoShow({
     const [settleCapitalReturned, setSettleCapitalReturned] = useState('');
     const [settleDate, setSettleDate] = useState(new Date().toISOString().split('T')[0]);
     const [settleNotes, setSettleNotes] = useState('');
+
+    // Delete batch modal
+    const [deletingBatch, setDeletingBatch] = useState<ApplicationBatch | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    // KFintech Allotment modal
+    const [allotmentModalOpen, setAllotmentModalOpen] = useState(false);
+    const [allotmentLoading, setAllotmentLoading] = useState(false);
+    const [allotmentResult, setAllotmentResult] = useState<AllotmentResultData | null>(null);
+    const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
+    const [isCheckingAllAllotments, setIsCheckingAllAllotments] = useState(false);
+
+    // PAN copy indicator
+    const [copiedPan, setCopiedPan] = useState<string | null>(null);
+
+    const copyPan = (pan: string) => {
+        navigator.clipboard.writeText(pan);
+        setCopiedPan(pan);
+        setTimeout(() => setCopiedPan(null), 2000);
+    };
+
+    const handleCheckAllotment = async (batch: ApplicationBatch) => {
+        setAllotmentBatch(batch);
+        setAllotmentLoading(true);
+        setAllotmentModalOpen(true);
+        setAllotmentResult(null);
+
+        try {
+            const response = await fetch(`/applications/${batch.id}/check-allotment`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+            const data = await response.json();
+            setAllotmentResult({
+                ...data,
+                pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
+                pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
+            });
+            router.reload({ only: ['batches', 'financials'] });
+        } catch (err: any) {
+            setAllotmentResult({
+                success: false,
+                message: err?.message || 'Failed to query KFintech allotment registry.',
+            });
+        } finally {
+            setAllotmentLoading(false);
+        }
+    };
+
+    const handleCheckAllAllotments = () => {
+        setIsCheckingAllAllotments(true);
+        router.post(`/ipos/${ipo.id}/check-allotments`, {}, {
+            preserveScroll: true,
+            onFinish: () => setIsCheckingAllAllotments(false),
+        });
+    };
+
+    const handleToggleFixApplications = () => {
+        router.post(`/ipos/${ipo.id}/toggle-fix`, {}, { preserveScroll: true });
+    };
+
+    const handleToggleAutoApproveFix = () => {
+        router.post(`/ipos/${ipo.id}/toggle-auto-approve-fix`, {}, { preserveScroll: true });
+    };
+
+    const handleDeleteSubmit = () => {
+        if (!deletingBatch) return;
+        setIsDeleting(true);
+        router.delete(`/applications/${deletingBatch.id}`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setDeletingBatch(null);
+                setIsDeleting(false);
+            },
+            onError: () => setIsDeleting(false),
+        });
+    };
+
+    const handleApprove = (batchId: number) => {
+        router.post(`/applications/${batchId}/approve`, {}, { preserveScroll: true });
+    };
+
+    const handleReject = (batchId: number) => {
+        router.post(`/applications/${batchId}/reject`, {}, { preserveScroll: true });
+    };
 
     const breadcrumbs: BreadcrumbItem[] = [
         {
@@ -408,14 +504,76 @@ export default function IpoShow({
 
                     <div className="flex flex-wrap items-center gap-2">
                         {isAdmin && (
-                            <Button
-                                variant="outline"
-                                onClick={() => setIsRateModalOpen(true)}
-                                className="border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950"
-                            >
-                                <Settings className="mr-2 h-4 w-4" />
-                                {ipo.active_rate ? 'Update Rates' : 'Configure Rates'}
-                            </Button>
+                            <>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleToggleFixApplications}
+                                    className={`text-xs h-9 ${
+                                        ipo.accept_fix_applications !== false
+                                            ? 'border-purple-300 text-purple-700 bg-purple-50/80 dark:bg-purple-950/40 dark:text-purple-300'
+                                            : 'border-neutral-300 text-neutral-500 bg-neutral-100 dark:bg-neutral-800'
+                                    }`}
+                                    title="Enable or disable accepting Fixed Rate applications for this IPO"
+                                >
+                                    {ipo.accept_fix_applications !== false ? (
+                                        <>
+                                            <ToggleRight className="mr-1.5 h-4 w-4 text-purple-600" />
+                                            Fix Apps: ON
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ToggleLeft className="mr-1.5 h-4 w-4 text-neutral-400" />
+                                            Fix Apps: OFF
+                                        </>
+                                    )}
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleToggleAutoApproveFix}
+                                    className={`text-xs h-9 ${
+                                        ipo.auto_approve_fix !== false
+                                            ? 'border-emerald-300 text-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                            : 'border-amber-300 text-amber-700 bg-amber-50/80 dark:bg-amber-950/40 dark:text-amber-300'
+                                    }`}
+                                    title="When ON, fix applications are auto-approved. When OFF, they require admin approval."
+                                >
+                                    {ipo.auto_approve_fix !== false ? (
+                                        <>
+                                            <ShieldCheck className="mr-1.5 h-3.5 w-3.5 text-emerald-600" />
+                                            Auto-Approve: ON
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ShieldAlert className="mr-1.5 h-3.5 w-3.5 text-amber-600" />
+                                            Auto-Approve: OFF
+                                        </>
+                                    )}
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleCheckAllAllotments}
+                                    disabled={isCheckingAllAllotments}
+                                    className="border-sky-300 text-sky-700 bg-sky-50/80 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 text-xs h-9"
+                                    title="Check and scrape all application PANs against KFintech portal"
+                                >
+                                    <RefreshCw className={`mr-1.5 h-3.5 w-3.5 text-sky-600 ${isCheckingAllAllotments ? 'animate-spin' : ''}`} />
+                                    {isCheckingAllAllotments ? 'Checking...' : 'Check All KFintech'}
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setIsRateModalOpen(true)}
+                                    className="border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950 h-9 text-xs"
+                                >
+                                    <Settings className="mr-1.5 h-3.5 w-3.5" />
+                                    {ipo.active_rate ? 'Update Rates' : 'Configure Rates'}
+                                </Button>
+                            </>
                         )}
 
                         <Button
@@ -1007,12 +1165,13 @@ export default function IpoShow({
                                                 const pans = batch.batch_pans || [];
                                                 const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
                                                 const panDisplay = panNumberRaw
-                                                    ? `XXXXXX${panNumberRaw.slice(-4)}`
+                                                    ? (isAdmin ? panNumberRaw : `XXXXXX${panNumberRaw.slice(-4)}`)
                                                     : 'No PAN';
 
                                                 const isAllotted = batch.application_status === 'allotted';
                                                 const isNotAllotted = batch.application_status === 'not_allotted';
-                                                const isPending = !isAllotted && !isNotAllotted;
+                                                const isPendingApproval = batch.application_status === 'pending_approval';
+                                                const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval;
 
                                                 const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
@@ -1037,8 +1196,22 @@ export default function IpoShow({
                                                             )}
                                                         </td>
                                                         <td className="py-3 px-3">
-                                                            <div className="font-mono text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                                                                {panDisplay}
+                                                            <div className="flex items-center gap-1.5 font-mono text-xs font-medium text-neutral-800 dark:text-neutral-200">
+                                                                <span>{panDisplay}</span>
+                                                                {isAdmin && panNumberRaw && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => copyPan(panNumberRaw)}
+                                                                        className="text-neutral-400 hover:text-blue-600 transition-colors"
+                                                                        title="Copy unmasked PAN"
+                                                                    >
+                                                                        {copiedPan === panNumberRaw ? (
+                                                                            <CheckCheck className="h-3 w-3 text-emerald-600" />
+                                                                        ) : (
+                                                                            <Copy className="h-3 w-3" />
+                                                                        )}
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                             {batch.upi_id ? (
                                                                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -1098,21 +1271,89 @@ export default function IpoShow({
                                                             )}
                                                         </td>
                                                         <td className="py-3 px-3">
-                                                            <Badge
-                                                                variant="outline"
-                                                                className={`text-[10px] uppercase font-semibold ${
-                                                                    isAllotted
-                                                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                                                        : isNotAllotted
-                                                                        ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                                                                        : 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-                                                                }`}
-                                                            >
-                                                                {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : (batch.application_status.replace('_', ' '))}
-                                                            </Badge>
+                                                            <div className="space-y-1">
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className={`text-[10px] uppercase font-semibold ${
+                                                                        isAllotted
+                                                                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                                                            : isNotAllotted
+                                                                            ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                                                                            : isPendingApproval
+                                                                            ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                                                                            : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                                                                    }`}
+                                                                >
+                                                                    {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : (batch.application_status.replace('_', ' '))}
+                                                                </Badge>
+
+                                                                {/* KFintech Scraped Info */}
+                                                                {batch.allotment_details && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setAllotmentBatch(batch);
+                                                                            setAllotmentResult({
+                                                                                success: true,
+                                                                                found: true,
+                                                                                allotted: batch.allotment_details?.allotted,
+                                                                                all_shares: batch.allotment_details?.allotted_shares,
+                                                                                app_shares: batch.allotment_details?.applied_shares,
+                                                                                application_number: batch.allotment_details?.application_number,
+                                                                                name_from_pan: batch.allotment_details?.name_from_pan,
+                                                                                dp_clid: batch.allotment_details?.dp_clid,
+                                                                                pan_masked: batch.allotment_details?.pan_masked,
+                                                                                pan_full: panNumberRaw || undefined,
+                                                                                kfin_ipo_name: batch.allotment_details?.kfin_ipo_name,
+                                                                                checked_at: batch.allotment_details?.checked_at,
+                                                                            });
+                                                                            setAllotmentModalOpen(true);
+                                                                        }}
+                                                                        className="block text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-medium"
+                                                                    >
+                                                                        KFintech Details ↗
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         </td>
                                                         <td className="py-3 px-3 text-right">
-                                                            <div className="flex items-center justify-end gap-1.5">
+                                                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                                                {/* Approval controls for admin */}
+                                                                {isPendingApproval && isAdmin && (
+                                                                    <>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            onClick={() => handleApprove(batch.id)}
+                                                                            className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                                                                            title="Approve Fixed Application"
+                                                                        >
+                                                                            <Check className="h-3 w-3 mr-1" /> Approve
+                                                                        </Button>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant="outline"
+                                                                            onClick={() => handleReject(batch.id)}
+                                                                            className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                                                            title="Reject Fixed Application"
+                                                                        >
+                                                                            <X className="h-3 w-3 mr-1" /> Reject
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+
+                                                                {/* KFintech Allotment Check Button */}
+                                                                {panNumberRaw && batch.application_status !== 'cancelled' && (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        onClick={() => handleCheckAllotment(batch)}
+                                                                        className="h-7 px-2 text-xs border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50 font-medium"
+                                                                        title="Live scrape allotment status from KFintech portal"
+                                                                    >
+                                                                        <Search className="h-3 w-3 mr-1 text-sky-600" /> Check Allotment
+                                                                    </Button>
+                                                                )}
+
                                                                 {isPending && (
                                                                     <>
                                                                         <Button
@@ -1177,6 +1418,19 @@ export default function IpoShow({
                                                                         onClick={() => openSettlementModal(batch)}
                                                                     >
                                                                         Adjust
+                                                                    </Button>
+                                                                )}
+
+                                                                {/* Delete Application Button */}
+                                                                {(isAdmin || batch.settlement_status !== 'settled') && (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="ghost"
+                                                                        className="text-neutral-400 hover:text-red-600 h-7 text-xs px-1.5"
+                                                                        onClick={() => setDeletingBatch(batch)}
+                                                                        title="Delete Application"
+                                                                    >
+                                                                        <Trash2 className="h-3.5 w-3.5" />
                                                                     </Button>
                                                                 )}
                                                             </div>
@@ -1869,20 +2123,31 @@ export default function IpoShow({
 
                         {/* Profit Sharing Model */}
                         <div className="space-y-2 border-t border-neutral-100 dark:border-neutral-800 pt-3">
-                            <Label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                                Profit Sharing Model Decided
-                            </Label>
+                            <div className="flex items-center justify-between">
+                                <Label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                                    Profit Sharing Model Decided
+                                </Label>
+                                {ipo.accept_fix_applications === false && !isAdmin && (
+                                    <span className="text-[10px] text-rose-500 font-medium">
+                                        Fixed rate disabled by admin
+                                    </span>
+                                )}
+                            </div>
                             <div className="grid grid-cols-3 gap-2">
                                 <button
                                     type="button"
+                                    disabled={!isAdmin && ipo.accept_fix_applications === false}
                                     onClick={() => setProfitSharingType('fix')}
                                     className={`py-2 px-2.5 text-xs font-medium rounded-lg border text-center transition ${
                                         profitSharingType === 'fix'
                                             ? 'border-purple-600 bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 font-semibold'
-                                            : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 hover:bg-neutral-50 dark:hover:bg-neutral-900'
+                                            : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 hover:bg-neutral-50 dark:hover:bg-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed'
                                     }`}
                                 >
                                     Fixed Amount (₹)
+                                    {!isAdmin && ipo.accept_fix_applications === false && (
+                                        <span className="block text-[9px] text-rose-500 font-normal">Closed</span>
+                                    )}
                                 </button>
                                 <button
                                     type="button"
@@ -1921,9 +2186,14 @@ export default function IpoShow({
                                         value={profitSharingValue}
                                         onChange={(e) => setProfitSharingValue(e.target.value)}
                                     />
-                                    <span className="text-[11px] text-neutral-400">
-                                        Applicant receives this fixed amount regardless of market fluctuation
-                                    </span>
+                                    <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                                        <span>Applicant receives this fixed amount regardless of market fluctuation</span>
+                                        {!isAdmin && ipo.auto_approve_fix === false && (
+                                            <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                                Requires Admin Approval
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
@@ -2470,6 +2740,52 @@ export default function IpoShow({
                             </Button>
                         </DialogFooter>
                     </form>
+                </DialogContent>
+            </Dialog>
+
+            {/* KFintech Allotment Status Modal */}
+            <KfintechAllotmentModal
+                isOpen={allotmentModalOpen}
+                onClose={() => setAllotmentModalOpen(false)}
+                isLoading={allotmentLoading}
+                result={allotmentResult}
+                companyName={ipo.company_name}
+                batchNumber={allotmentBatch?.batch_number}
+                onRecheck={() => allotmentBatch && handleCheckAllotment(allotmentBatch)}
+            />
+
+            {/* Delete Batch Confirmation Modal */}
+            <Dialog open={!!deletingBatch} onOpenChange={() => setDeletingBatch(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-600 flex items-center gap-2">
+                            <Trash2 className="h-5 w-5" />
+                            Delete Application: {deletingBatch?.batch_number}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to permanently delete this application for{' '}
+                            <strong>{ipo.company_name}</strong>? This action will remove all linked records and cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setDeletingBatch(null)}
+                            disabled={isDeleting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleDeleteSubmit}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? 'Deleting...' : 'Delete Application'}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </AppLayout>

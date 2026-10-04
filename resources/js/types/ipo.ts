@@ -48,10 +48,14 @@ export interface Ipo {
     min_retail_qty?: number | null;
     issue_size?: number | string | null;
     gmp?: number | string | null;
+    accept_fix_applications?: boolean;
+    auto_approve_fix?: boolean;
+    kfin_client_id?: string | null;
     status: 'upcoming' | 'open' | 'closed' | 'allotted' | 'listed';
     provider: string;
     provider_id?: string | null;
     last_synced_at?: string | null;
+    allotment_scraped_at?: string | null;
     created_at: string;
     updated_at: string;
     active_rate?: IpoRate | null;
@@ -162,6 +166,7 @@ export interface ApplicationBatch {
         | 'ready'
         | 'submitted'
         | 'confirmed'
+        | 'pending_approval'
         | 'pending_allotment'
         | 'allotted'
         | 'not_allotted'
@@ -170,6 +175,19 @@ export interface ApplicationBatch {
     trader_reference?: string | null;
     submission_date?: string | null;
     notes?: string | null;
+    allotment_details?: {
+        kfin_client_id?: string;
+        kfin_ipo_name?: string;
+        application_number?: string;
+        name_from_pan?: string;
+        applied_shares?: number;
+        allotted_shares?: number;
+        dp_clid?: string;
+        pan_masked?: string;
+        allotted?: boolean;
+        checked_at?: string;
+    } | null;
+    allotment_checked_at?: string | null;
     created_by_user_id?: number | null;
     created_at: string;
     updated_at: string;

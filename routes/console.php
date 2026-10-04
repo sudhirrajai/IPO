@@ -12,3 +12,8 @@ Schedule::command('ipo:scrape-gmp')
     ->everyThirtyMinutes()
     ->withoutOverlapping()
     ->runInBackground();
+
+Schedule::command('ipo:check-allotment')
+    ->hourly()
+    ->withoutOverlapping()
+    ->runInBackground();

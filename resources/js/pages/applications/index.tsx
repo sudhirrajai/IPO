@@ -2,8 +2,10 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
     Ban,
     Check,
+    CheckCheck,
     CheckCircle2,
     Clock,
+    Copy,
     CreditCard,
     DollarSign,
     Eye,
@@ -13,10 +15,15 @@ import {
     Landmark,
     Plus,
     Search,
+    ShieldAlert,
+    ShieldCheck,
+    Sparkles,
+    Trash2,
     TrendingUp,
     X,
 } from 'lucide-react';
 import { useState } from 'react';
+import KfintechAllotmentModal, { type AllotmentResultData } from '@/components/kfintech-allotment-modal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -82,6 +89,77 @@ export default function ApplicationsIndex({
     // Cancel modal
     const [cancellingBatch, setCancellingBatch] = useState<ApplicationBatch | null>(null);
     const [cancelReason, setCancelReason] = useState('');
+
+    // Delete modal
+    const [deletingBatch, setDeletingBatch] = useState<ApplicationBatch | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    // KFintech Allotment modal
+    const [allotmentModalOpen, setAllotmentModalOpen] = useState(false);
+    const [allotmentLoading, setAllotmentLoading] = useState(false);
+    const [allotmentResult, setAllotmentResult] = useState<AllotmentResultData | null>(null);
+    const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
+
+    // PAN copy indicator
+    const [copiedPan, setCopiedPan] = useState<string | null>(null);
+
+    const copyPan = (pan: string) => {
+        navigator.clipboard.writeText(pan);
+        setCopiedPan(pan);
+        setTimeout(() => setCopiedPan(null), 2000);
+    };
+
+    const handleCheckAllotment = async (batch: ApplicationBatch) => {
+        setAllotmentBatch(batch);
+        setAllotmentLoading(true);
+        setAllotmentModalOpen(true);
+        setAllotmentResult(null);
+
+        try {
+            const response = await fetch(`/applications/${batch.id}/check-allotment`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+            const data = await response.json();
+            setAllotmentResult({
+                ...data,
+                pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
+                pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
+            });
+            // Refresh table data smoothly
+            router.reload({ only: ['batches'] });
+        } catch (err: any) {
+            setAllotmentResult({
+                success: false,
+                message: err?.message || 'Failed to query KFintech allotment registry.',
+            });
+        } finally {
+            setAllotmentLoading(false);
+        }
+    };
+
+    const handleDeleteSubmit = () => {
+        if (!deletingBatch) return;
+        setIsDeleting(true);
+        router.delete(`/applications/${deletingBatch.id}`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setDeletingBatch(null);
+                setIsDeleting(false);
+            },
+            onError: () => setIsDeleting(false),
+        });
+    };
+
+    const handleApprove = (batchId: number) => {
+        router.post(`/applications/${batchId}/approve`, {}, { preserveScroll: true });
+    };
+
+    const handleReject = (batchId: number) => {
+        router.post(`/applications/${batchId}/reject`, {}, { preserveScroll: true });
+    };
 
     const formatInr = (amount: number | string | null | undefined) => {
         const val = Number(amount) || 0;
@@ -286,9 +364,9 @@ export default function ApplicationsIndex({
                                 <table className="w-full text-left text-sm">
                                     <thead className="border-b border-neutral-200 bg-neutral-50/50 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50">
                                         <tr>
-                                            <th className="py-3 px-4">Applicant & ID</th>
+                                            <th className="py-3 px-4">Applicant & PAN</th>
                                             <th className="py-3 px-4">IPO</th>
-                                            <th className="py-3 px-4">Bank</th>
+                                            <th className="py-3 px-4">Bank & UPI</th>
                                             <th className="py-3 px-4">Amount</th>
                                             <th className="py-3 px-4">Profit Sharing</th>
                                             <th className="py-3 px-4">Payout</th>
@@ -298,9 +376,16 @@ export default function ApplicationsIndex({
                                     </thead>
                                     <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
                                         {batches.data.map((batch) => {
+                                            const pans = batch.batch_pans || [];
+                                            const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
+                                            const panDisplay = panNumberRaw
+                                                ? (isAdmin ? panNumberRaw : `XXXXXX${panNumberRaw.slice(-4)}`)
+                                                : null;
+
                                             const isAllotted = batch.application_status === 'allotted';
                                             const isNotAllotted = batch.application_status === 'not_allotted';
-                                            const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled';
+                                            const isPendingApproval = batch.application_status === 'pending_approval';
+                                            const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval;
                                             const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
                                             return (
@@ -309,16 +394,37 @@ export default function ApplicationsIndex({
                                                         <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
                                                             {batch.applicant_name || batch.user?.name || 'Applicant'}
                                                         </span>
-                                                        <span className="font-mono text-xs text-neutral-400">
-                                                            {batch.batch_number}
-                                                        </span>
+                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                            <span className="font-mono text-xs text-neutral-400">
+                                                                {batch.batch_number}
+                                                            </span>
+                                                            {panDisplay && (
+                                                                <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded text-neutral-700 dark:text-neutral-300 font-medium">
+                                                                    PAN: {panDisplay}
+                                                                    {isAdmin && panNumberRaw && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => copyPan(panNumberRaw)}
+                                                                            className="text-neutral-400 hover:text-blue-600 transition-colors ml-0.5"
+                                                                            title="Copy unmasked PAN"
+                                                                        >
+                                                                            {copiedPan === panNumberRaw ? (
+                                                                                <CheckCheck className="h-3 w-3 text-emerald-600" />
+                                                                            ) : (
+                                                                                <Copy className="h-3 w-3" />
+                                                                            )}
+                                                                        </button>
+                                                                    )}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                     <td className="py-3 px-4 font-medium">
                                                         <Link href={`/ipos/${batch.ipo_id}`} className="hover:underline text-blue-600 dark:text-blue-400">
                                                             {batch.ipo?.company_name}
                                                         </Link>
                                                         <span className="text-[11px] text-neutral-400 block">
-                                                            {batch.application_count} lot(s)
+                                                            {batch.application_count} lot(s) ({batch.application_count * (batch.ipo?.lot_size || 1)} sh)
                                                         </span>
                                                     </td>
                                                     <td className="py-3 px-4">
@@ -377,28 +483,96 @@ export default function ApplicationsIndex({
                                                         )}
                                                     </td>
                                                     <td className="py-3 px-4">
-                                                        <Badge
-                                                            variant="outline"
-                                                            className={`text-[10px] uppercase font-semibold ${
-                                                                isAllotted
-                                                                    ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                                                    : isNotAllotted
-                                                                    ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                                                                    : 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-                                                            }`}
-                                                        >
-                                                            {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : batch.application_status.replace('_', ' ')}
-                                                        </Badge>
+                                                        <div className="space-y-1">
+                                                            <Badge
+                                                                variant="outline"
+                                                                className={`text-[10px] uppercase font-semibold ${
+                                                                    isAllotted
+                                                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                                                        : isNotAllotted
+                                                                        ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                                                                        : isPendingApproval
+                                                                        ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                                                                        : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                                                                }`}
+                                                            >
+                                                                {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : batch.application_status.replace('_', ' ')}
+                                                            </Badge>
+
+                                                            {/* If KFintech allotment was scraped, show badge with click to inspect */}
+                                                            {batch.allotment_details && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setAllotmentBatch(batch);
+                                                                        setAllotmentResult({
+                                                                            success: true,
+                                                                            found: true,
+                                                                            allotted: batch.allotment_details?.allotted,
+                                                                            all_shares: batch.allotment_details?.allotted_shares,
+                                                                            app_shares: batch.allotment_details?.applied_shares,
+                                                                            application_number: batch.allotment_details?.application_number,
+                                                                            name_from_pan: batch.allotment_details?.name_from_pan,
+                                                                            dp_clid: batch.allotment_details?.dp_clid,
+                                                                            pan_masked: batch.allotment_details?.pan_masked,
+                                                                            pan_full: panNumberRaw || undefined,
+                                                                            kfin_ipo_name: batch.allotment_details?.kfin_ipo_name,
+                                                                            checked_at: batch.allotment_details?.checked_at,
+                                                                        });
+                                                                        setAllotmentModalOpen(true);
+                                                                    }}
+                                                                    className="block text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-medium"
+                                                                >
+                                                                    KFintech Details ↗
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                     <td className="py-3 px-4 text-right">
-                                                        <div className="flex items-center justify-end gap-1.5">
+                                                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                                            {/* Admin Approval Actions for Fix Rate Applications */}
+                                                            {isPendingApproval && isAdmin && (
+                                                                <>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        onClick={() => handleApprove(batch.id)}
+                                                                        className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                                                                        title="Approve Fixed Application"
+                                                                    >
+                                                                        <Check className="h-3 w-3 mr-1" /> Approve
+                                                                    </Button>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        onClick={() => handleReject(batch.id)}
+                                                                        className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                                                                        title="Reject Fixed Application"
+                                                                    >
+                                                                        <X className="h-3 w-3 mr-1" /> Reject
+                                                                    </Button>
+                                                                </>
+                                                            )}
+
+                                                            {/* Check Allotment Button (Live KFintech Scraper) */}
+                                                            {panNumberRaw && batch.application_status !== 'cancelled' && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => handleCheckAllotment(batch)}
+                                                                    className="h-7 px-2 text-xs border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50 font-medium"
+                                                                    title="Live scrape allotment status from KFintech portal"
+                                                                >
+                                                                    <Search className="h-3 w-3 mr-1 text-sky-600" /> Check Allotment
+                                                                </Button>
+                                                            )}
+
                                                             {isPending && (
                                                                 <>
                                                                     <Button
                                                                         size="sm"
                                                                         onClick={() => handleStatusChange(batch.id, 'allotted')}
                                                                         className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
-                                                                        title="Mark Allotted"
+                                                                        title="Manually Mark Allotted"
                                                                     >
                                                                         <Check className="h-3 w-3 mr-1" /> Allotted
                                                                     </Button>
@@ -407,7 +581,7 @@ export default function ApplicationsIndex({
                                                                         variant="outline"
                                                                         onClick={() => handleStatusChange(batch.id, 'not_allotted')}
                                                                         className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
-                                                                        title="Mark Not Allotted"
+                                                                        title="Manually Mark Not Allotted"
                                                                     >
                                                                         <X className="h-3 w-3 mr-1" /> Not Allotted
                                                                     </Button>
@@ -426,15 +600,29 @@ export default function ApplicationsIndex({
                                                                 </span>
                                                             )}
 
+                                                            {/* Cancel Button */}
                                                             {batch.application_status !== 'cancelled' && (
                                                                 <Button
                                                                     size="sm"
                                                                     variant="ghost"
-                                                                    className="text-neutral-400 hover:text-red-600 h-7 text-xs ml-1"
+                                                                    className="text-neutral-400 hover:text-amber-600 h-7 text-xs px-1.5"
                                                                     onClick={() => setCancellingBatch(batch)}
                                                                     title="Cancel Application"
                                                                 >
                                                                     <Ban className="h-3.5 w-3.5" />
+                                                                </Button>
+                                                            )}
+
+                                                            {/* Delete Button */}
+                                                            {(isAdmin || batch.settlement_status !== 'settled') && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="ghost"
+                                                                    className="text-neutral-400 hover:text-red-600 h-7 text-xs px-1.5"
+                                                                    onClick={() => setDeletingBatch(batch)}
+                                                                    title="Delete Application"
+                                                                >
+                                                                    <Trash2 className="h-3.5 w-3.5" />
                                                                 </Button>
                                                             )}
                                                         </div>
@@ -449,6 +637,52 @@ export default function ApplicationsIndex({
                     </CardContent>
                 </Card>
             </div>
+
+            {/* KFintech Allotment Status Modal */}
+            <KfintechAllotmentModal
+                isOpen={allotmentModalOpen}
+                onClose={() => setAllotmentModalOpen(false)}
+                isLoading={allotmentLoading}
+                result={allotmentResult}
+                companyName={allotmentBatch?.ipo?.company_name}
+                batchNumber={allotmentBatch?.batch_number}
+                onRecheck={() => allotmentBatch && handleCheckAllotment(allotmentBatch)}
+            />
+
+            {/* Delete Batch Confirmation Modal */}
+            <Dialog open={!!deletingBatch} onOpenChange={() => setDeletingBatch(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-600 flex items-center gap-2">
+                            <Trash2 className="h-5 w-5" />
+                            Delete Application: {deletingBatch?.batch_number}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to permanently delete this application for{' '}
+                            <strong>{deletingBatch?.ipo?.company_name}</strong>? This action will remove all linked records and cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setDeletingBatch(null)}
+                            disabled={isDeleting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleDeleteSubmit}
+                            disabled={isDeleting}
+                        >
+                            {isDeleting ? 'Deleting...' : 'Delete Application'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Cancel Batch Modal */}
             <Dialog open={!!cancellingBatch} onOpenChange={() => setCancellingBatch(null)}>

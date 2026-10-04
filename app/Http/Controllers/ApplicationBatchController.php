@@ -158,4 +158,71 @@ class ApplicationBatchController extends Controller
 
         return back()->with('success', "Application batch {$batch->batch_number} has been cancelled.");
     }
+
+    public function destroy(Request $request, ApplicationBatch $batch): RedirectResponse
+    {
+        $user = $request->user();
+        if (! $user->isAdmin() && $batch->user_id !== $user->id) {
+            abort(403, 'Unauthorized to delete this application.');
+        }
+
+        if ($batch->settlement_status === 'settled') {
+            return back()->with('error', 'Cannot delete an application batch that has already been settled.');
+        }
+
+        $batchNumber = $batch->batch_number;
+
+        AuditService::log('batch_deleted', $batch, $batch->toArray(), ['deleted_by' => $user->name]);
+
+        // Clean up linked batch pans
+        $batch->batchPans()->delete();
+        $batch->delete();
+
+        return back()->with('success', "Application {$batchNumber} was deleted successfully.");
+    }
+
+    public function checkAllotment(Request $request, ApplicationBatch $batch): \Illuminate\Http\JsonResponse|RedirectResponse
+    {
+        $user = $request->user();
+        if (! $user->isAdmin() && $batch->user_id !== $user->id) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $result = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
+
+        if ($request->wantsJson()) {
+            return response()->json($result);
+        }
+
+        if ($result['success'] && $result['found']) {
+            $statusMsg = $result['allotted'] ? 'ALLOTTED' : 'NOT ALLOTTED';
+            return back()->with('success', "Allotment status from KFintech: {$statusMsg}. (Name: {$result['name_from_pan']})");
+        }
+
+        return back()->with('info', $result['message'] ?? 'No allotment record found on KFintech.');
+    }
+
+    public function approve(Request $request, ApplicationBatch $batch): RedirectResponse
+    {
+        if (! $request->user()->isAdmin()) {
+            abort(403, 'Only admins can approve applications.');
+        }
+
+        $batch->update(['application_status' => 'confirmed']);
+        AuditService::log('batch_approved', $batch, null, ['approved_by' => $request->user()->name]);
+
+        return back()->with('success', "Application {$batch->batch_number} approved successfully.");
+    }
+
+    public function reject(Request $request, ApplicationBatch $batch): RedirectResponse
+    {
+        if (! $request->user()->isAdmin()) {
+            abort(403, 'Only admins can reject applications.');
+        }
+
+        $batch->update(['application_status' => 'cancelled']);
+        AuditService::log('batch_rejected', $batch, null, ['rejected_by' => $request->user()->name]);
+
+        return back()->with('success', "Application {$batch->batch_number} rejected.");
+    }
 }
