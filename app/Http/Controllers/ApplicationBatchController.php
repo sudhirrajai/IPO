@@ -142,24 +142,61 @@ class ApplicationBatchController extends Controller
             $validated['user_id'] = $user->id;
         }
 
-        if (! empty($validated['pan_ids']) && is_array($validated['pan_ids'])) {
-            $validated['application_count'] = count($validated['pan_ids']);
-            if (empty($validated['applicant_name']) || empty($validated['pan_number'])) {
-                $firstPan = UserPan::find($validated['pan_ids'][0]);
-                if ($firstPan) {
-                    $validated['applicant_name'] = $validated['applicant_name'] ?? $firstPan->account_holder_name;
-                    $validated['pan_number'] = $validated['pan_number'] ?? $firstPan->pan_number;
-                }
-            }
-        } else {
-            $validated['application_count'] = (int) ($validated['application_count'] ?? 1);
-        }
-
         $validated['funding_source'] = $isAdmin
             ? ($validated['funding_source'] ?? 'my_money')
             : 'user_money';
 
         try {
+            if (! empty($validated['pan_ids']) && is_array($validated['pan_ids'])) {
+                $panIds = array_values(array_unique(array_filter($validated['pan_ids'])));
+                $panQuery = UserPan::whereIn('id', $panIds);
+                if (! $isAdmin) {
+                    $panQuery->where('user_id', $user->id);
+                }
+                $pans = $panQuery->get()->keyBy('id');
+
+                if ($pans->isEmpty()) {
+                    return back()->with('error', 'No valid PAN cards were found for this application.');
+                }
+
+                $createdBatches = \Illuminate\Support\Facades\DB::transaction(function () use ($validated, $panIds, $pans, $isAdmin, $user) {
+                    $batches = [];
+                    foreach ($panIds as $panId) {
+                        if (! isset($pans[$panId])) {
+                            continue;
+                        }
+                        $pan = $pans[$panId];
+
+                        $singleData = $validated;
+                        unset($singleData['pan_ids']);
+                        $singleData['pan_id'] = $pan->id;
+                        $singleData['pan_number'] = $pan->pan_number;
+                        $singleData['applicant_name'] = $pan->account_holder_name ?: ($validated['applicant_name'] ?? 'Applicant');
+                        $singleData['application_count'] = 1;
+
+                        if (! $isAdmin) {
+                            $singleData['user_id'] = $user->id;
+                        } else {
+                            $singleData['user_id'] = ! empty($validated['user_id'])
+                                ? (int) $validated['user_id']
+                                : ($pan->user_id ?? $user->id);
+                        }
+
+                        $batches[] = ApplicationBatchService::createBatch($singleData, $isAdmin);
+                    }
+
+                    return $batches;
+                });
+
+                $count = count($createdBatches);
+                $message = $count === 1
+                    ? "Application {$createdBatches[0]->batch_number} created successfully."
+                    : "Successfully created {$count} individual applications for each selected PAN.";
+
+                return back()->with('success', $message);
+            }
+
+            $validated['application_count'] = (int) ($validated['application_count'] ?? 1);
             $batch = ApplicationBatchService::createBatch($validated, $isAdmin);
 
             return back()->with('success', "Application batch {$batch->batch_number} created successfully.");

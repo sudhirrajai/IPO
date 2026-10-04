@@ -56,23 +56,32 @@ test('regular user can apply in bulk using multiple saved PAN cards', function (
 
     $response->assertRedirect();
 
-    $batch = ApplicationBatch::where('ipo_id', $ipo->id)
+    $batches = ApplicationBatch::where('ipo_id', $ipo->id)
         ->where('user_id', $user->id)
-        ->latest('id')
-        ->first();
+        ->orderBy('id')
+        ->get();
 
-    expect($batch)->not->toBeNull()
-        ->and($batch->application_count)->toBe(3)
-        ->and((float) $batch->expected_user_payout)->toBe(3600.0) // 1200 * 3
-        ->and($batch->funding_source)->toBe('user_money');
+    expect($batches)->toHaveCount(3);
 
-    $batchPans = ApplicationBatchPan::where('application_batch_id', $batch->id)->get();
-    expect($batchPans)->toHaveCount(3);
-    expect($batchPans->pluck('pan_number_snapshot')->toArray())->toBe([
-        'ABCDE1111A',
-        'BCDEF2222B',
-        'CDEFG3333C',
-    ]);
+    // Each batch should be an individual application entry with count 1
+    expect($batches[0]->application_count)->toBe(1)
+        ->and($batches[0]->pan_number)->toBe('ABCDE1111A')
+        ->and($batches[0]->applicant_name)->toBe('Rahul Sharma')
+        ->and((float) $batches[0]->expected_user_payout)->toBe(1200.0)
+        ->and($batches[0]->funding_source)->toBe('user_money');
+
+    expect($batches[1]->application_count)->toBe(1)
+        ->and($batches[1]->pan_number)->toBe('BCDEF2222B')
+        ->and($batches[1]->applicant_name)->toBe('Pooja Sharma')
+        ->and((float) $batches[1]->expected_user_payout)->toBe(1200.0);
+
+    expect($batches[2]->application_count)->toBe(1)
+        ->and($batches[2]->pan_number)->toBe('CDEFG3333C')
+        ->and($batches[2]->applicant_name)->toBe('Amit Sharma')
+        ->and((float) $batches[2]->expected_user_payout)->toBe(1200.0);
+
+    // Total expected payout across entries
+    expect((float) $batches->sum('expected_user_payout'))->toBe(3600.0);
 });
 
 test('admin can apply in bulk using PAN cards across users with chosen funding source', function () {
@@ -121,18 +130,28 @@ test('admin can apply in bulk using PAN cards across users with chosen funding s
 
     $response->assertRedirect();
 
-    $batch = ApplicationBatch::where('ipo_id', $ipo->id)
+    $batches = ApplicationBatch::where('ipo_id', $ipo->id)
         ->where('user_id', $friend->id)
-        ->latest('id')
-        ->first();
+        ->orderBy('id')
+        ->get();
 
-    expect($batch)->not->toBeNull()
-        ->and($batch->application_count)->toBe(2)
-        ->and((float) $batch->expected_user_payout)->toBe(3400.0) // 1700 * 2
-        ->and((float) $batch->expected_net_earnings)->toBe(600.0) // (2000 - 1700) * 2
-        ->and($batch->funding_source)->toBe('my_money')
-        ->and($batch->trader_reference)->toBe('TR-BULK-01');
+    expect($batches)->toHaveCount(2);
 
-    $batchPans = ApplicationBatchPan::where('application_batch_id', $batch->id)->get();
-    expect($batchPans)->toHaveCount(2);
+    expect($batches[0]->application_count)->toBe(1)
+        ->and($batches[0]->pan_number)->toBe('KLMNO4444D')
+        ->and($batches[0]->applicant_name)->toBe('Vikram Singh')
+        ->and((float) $batches[0]->expected_user_payout)->toBe(1700.0)
+        ->and((float) $batches[0]->expected_net_earnings)->toBe(300.0)
+        ->and($batches[0]->funding_source)->toBe('my_money')
+        ->and($batches[0]->trader_reference)->toBe('TR-BULK-01');
+
+    expect($batches[1]->application_count)->toBe(1)
+        ->and($batches[1]->pan_number)->toBe('MNOPQ5555E')
+        ->and($batches[1]->applicant_name)->toBe('Sunita Singh')
+        ->and((float) $batches[1]->expected_user_payout)->toBe(1700.0)
+        ->and((float) $batches[1]->expected_net_earnings)->toBe(300.0)
+        ->and($batches[1]->funding_source)->toBe('my_money');
+
+    expect((float) $batches->sum('expected_user_payout'))->toBe(3400.0)
+        ->and((float) $batches->sum('expected_net_earnings'))->toBe(600.0);
 });

@@ -3009,7 +3009,7 @@ export default function IpoShow({
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
                             >
                                 {applyMode === 'bulk'
-                                    ? `Submit Bulk Applications (${selectedBulkPanIds.length} Lots)`
+                                    ? `Create ${selectedBulkPanIds.length} Applications (${selectedBulkPanIds.length} PANs)`
                                     : (isAdmin ? 'Record Application' : 'Submit Application')}
                             </Button>
                         </DialogFooter>
