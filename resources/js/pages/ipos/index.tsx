@@ -10,9 +10,10 @@ import {
     Search,
     Star,
     TrendingUp,
+    X,
     Zap,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
@@ -70,6 +71,31 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
     const isAdmin = auth.user?.role === 'admin';
 
     const [search, setSearch] = useState(filters.search || '');
+    const [searchCountdown, setSearchCountdown] = useState<number | null>(null);
+
+    // Auto-search 5 seconds after typing stopped
+    useEffect(() => {
+        const currentAppliedSearch = filters.search || '';
+        if (search === currentAppliedSearch) {
+            setSearchCountdown(null);
+            return;
+        }
+
+        setSearchCountdown(5);
+        const interval = setInterval(() => {
+            setSearchCountdown((prev) => (prev && prev > 1 ? prev - 1 : null));
+        }, 1000);
+
+        const timer = setTimeout(() => {
+            handleFilterChange('search', search);
+            setSearchCountdown(null);
+        }, 5000);
+
+        return () => {
+            clearTimeout(timer);
+            clearInterval(interval);
+        };
+    }, [search, filters.search]);
     const [statusFilter, setStatusFilter] = useState(filters.status || 'all');
     const [typeFilter, setTypeFilter] = useState(filters.type || 'all');
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -146,7 +172,14 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
 
     const handleSearchSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        setSearchCountdown(null);
         handleFilterChange('search', search);
+    };
+
+    const clearSearch = () => {
+        setSearch('');
+        setSearchCountdown(null);
+        handleFilterChange('search', '');
     };
 
     const handleCreateIpo = (e: React.FormEvent) => {
@@ -327,11 +360,28 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
                     <form onSubmit={handleSearchSubmit} className="relative flex-1">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
                         <Input
-                            placeholder="Search IPO company or symbol..."
+                            placeholder="Search IPO company, symbol, or market... (auto-searches after 5s)"
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="pl-9 h-9 text-xs sm:text-sm"
+                            className="pl-9 pr-16 h-9 text-xs sm:text-sm"
                         />
+                        <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                            {searchCountdown !== null && (
+                                <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-950/50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 ring-1 ring-inset ring-blue-500/20 animate-pulse">
+                                    {searchCountdown}s
+                                </span>
+                            )}
+                            {search && (
+                                <button
+                                    type="button"
+                                    onClick={clearSearch}
+                                    className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                                    title="Clear search"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            )}
+                        </div>
                     </form>
 
                     <div className="flex items-center gap-2 justify-between sm:justify-end">

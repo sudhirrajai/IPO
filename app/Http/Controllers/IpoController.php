@@ -61,10 +61,12 @@ class IpoController extends Controller
         }
 
         if ($request->filled('search')) {
-            $search = '%'.$request->search.'%';
+            $search = '%'.trim($request->search).'%';
             $query->where(function ($q) use ($search) {
                 $q->where('company_name', 'like', $search)
-                    ->orWhere('symbol', 'like', $search);
+                    ->orWhere('symbol', 'like', $search)
+                    ->orWhere('category', 'like', $search)
+                    ->orWhere('exchange', 'like', $search);
             });
         }
 

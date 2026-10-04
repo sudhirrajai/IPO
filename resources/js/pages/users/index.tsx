@@ -244,6 +244,7 @@ export default function UsersIndex({ users, filters }: UsersIndexProps) {
                             <table className="w-full text-left text-sm">
                                 <thead className="border-b border-neutral-200 bg-neutral-50/50 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50">
                                     <tr>
+                                        <th className="py-3 px-3 w-12 text-center">#</th>
                                         <th className="py-3 px-4">Name</th>
                                         <th className="py-3 px-4">Email</th>
                                         <th className="py-3 px-4">Phone</th>
@@ -257,17 +258,21 @@ export default function UsersIndex({ users, filters }: UsersIndexProps) {
                                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
                                     {users.data.length === 0 ? (
                                         <tr>
-                                            <td colSpan={8} className="py-8 text-center text-neutral-500">
+                                            <td colSpan={9} className="py-8 text-center text-neutral-500">
                                                 No users found matching your filters.
                                             </td>
                                         </tr>
                                     ) : (
-                                        users.data.map((u) => {
+                                        users.data.map((u, index) => {
+                                            const rowNumber = (users.current_page - 1) * 15 + index + 1;
                                             const isSelf = auth.user.id === u.id;
                                             const isArchived = u.status === 'archived' || Boolean(u.deleted_at);
 
                                             return (
                                                 <tr key={u.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
+                                                    <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
+                                                        {rowNumber}
+                                                    </td>
                                                     <td className="py-3 px-4">
                                                         <div className="font-semibold text-neutral-900 dark:text-neutral-50 flex items-center gap-1.5">
                                                             {u.name}

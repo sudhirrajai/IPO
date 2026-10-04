@@ -336,6 +336,7 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                             <table className="w-full text-left text-sm">
                                 <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-800/50">
                                     <tr>
+                                        <th className="py-3 px-3 w-12 text-center">#</th>
                                         <th className="py-3 px-4">Status</th>
                                         <th className="py-3 px-4">PAN Number</th>
                                         <th className="py-3 px-4">Account Holder</th>
@@ -346,12 +347,16 @@ export default function PansIndex({ pans, users, filters, isAdmin }: PansIndexPr
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                                    {pans.data.map((pan) => {
+                                    {pans.data.map((pan, idx) => {
+                                        const rowNumber = (pans.current_page - 1) * 15 + idx + 1;
                                         const isRevealed = Boolean(revealedPans[pan.id]);
                                         const displayedPan = isRevealed ? revealedPans[pan.id] : pan.masked_pan;
 
                                         return (
                                             <tr key={pan.id} className="hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40 transition-colors">
+                                                <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
+                                                    {rowNumber}
+                                                </td>
                                                 <td className="py-3 px-4">
                                                     <Badge
                                                         variant={pan.status === 'active' ? 'default' : 'secondary'}

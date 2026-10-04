@@ -120,6 +120,7 @@ export default function AuditIndex({ logs, filters }: AuditIndexProps) {
                             <table className="w-full text-left text-sm">
                                 <thead className="border-b border-neutral-200 bg-neutral-50/50 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50">
                                     <tr>
+                                        <th className="py-3 px-3 w-12 text-center">#</th>
                                         <th className="py-3 px-4">Action</th>
                                         <th className="py-3 px-4">Description</th>
                                         <th className="py-3 px-4">Initiated By</th>
@@ -128,9 +129,14 @@ export default function AuditIndex({ logs, filters }: AuditIndexProps) {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                                    {logs.data.map((log) => (
-                                        <tr key={log.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
-                                            <td className="py-3 px-4">
+                                    {logs.data.map((log, index) => {
+                                        const rowNumber = (logs.current_page - 1) * 25 + index + 1;
+                                        return (
+                                            <tr key={log.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
+                                                <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
+                                                    {rowNumber}
+                                                </td>
+                                                <td className="py-3 px-4">
                                                 <Badge
                                                     variant="outline"
                                                     className={`text-[11px] font-semibold tracking-wide uppercase px-2 py-0.5 ${
@@ -159,7 +165,8 @@ export default function AuditIndex({ logs, filters }: AuditIndexProps) {
                                                 {new Date(log.created_at).toLocaleString()}
                                             </td>
                                         </tr>
-                                    ))}
+                                    );
+                                })}
                                 </tbody>
                             </table>
                         )}

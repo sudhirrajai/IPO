@@ -694,6 +694,7 @@ export default function ApplicationsIndex({
                                 <table className="w-full text-left text-sm">
                                     <thead className="border-b border-neutral-200 bg-neutral-50/50 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50">
                                         <tr>
+                                            <th className="py-3 px-3 w-12 text-center">#</th>
                                             <th className="py-3 px-4">Applicant & PAN</th>
                                             <th className="py-3 px-4">IPO</th>
                                             <th className="py-3 px-4">Bank & UPI</th>
@@ -705,7 +706,8 @@ export default function ApplicationsIndex({
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                                        {batches.data.map((batch) => {
+                                        {batches.data.map((batch, index) => {
+                                            const rowNumber = (batches.current_page - 1) * 15 + index + 1;
                                             const pans = batch.batch_pans || [];
                                             const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
                                             const panDisplay = panNumberRaw
@@ -745,6 +747,9 @@ export default function ApplicationsIndex({
                                                             : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
                                                     }`}
                                                 >
+                                                    <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
+                                                        {rowNumber}
+                                                    </td>
                                                     <td className="py-3 px-4">
                                                         <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
                                                             {batch.applicant_name || batch.user?.name || 'Applicant'}

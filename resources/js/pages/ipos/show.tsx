@@ -1497,6 +1497,7 @@ export default function IpoShow({
                             <table className="w-full text-left text-sm">
                                 <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800">
                                     <tr>
+                                        <th className="py-3 px-3 w-12 text-center">#</th>
                                         <th className="py-3 px-3">Applicant & Batch</th>
                                         <th className="py-3 px-3">Bank</th>
                                         <th className="py-3 px-3">PAN & UPI</th>
@@ -1509,7 +1510,7 @@ export default function IpoShow({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                                    {batchList.map((batch) => {
+                                    {batchList.map((batch, index) => {
                                         const pans = batch.batch_pans || [];
                                         const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
                                         const panDisplay = panNumberRaw
@@ -1550,6 +1551,9 @@ export default function IpoShow({
                                                         : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
                                                 }`}
                                             >
+                                                <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
+                                                    {index + 1}
+                                                </td>
                                                 <td className="py-3 px-3">
                                                     <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
                                                         {batch.applicant_name || batch.user?.name || 'Applicant'}
