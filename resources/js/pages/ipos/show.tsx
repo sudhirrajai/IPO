@@ -63,6 +63,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import AppLayout from '@/layouts/app-layout';
+import { formatIstDate, formatIstDateTime, getIstToday } from '@/lib/utils';
 import type { ApplicationBatch, BankAccount, BreadcrumbItem, Ipo, User, UserPan, UserUpi } from '@/types';
 
 interface IpoShowProps {
@@ -158,8 +159,11 @@ export default function IpoShow({
     const [batchNotes, setBatchNotes] = useState('');
     const [batchTraderRef, setBatchTraderRef] = useState('');
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    const isIpoAllotmentToday = Boolean(ipo.allotment_date && ipo.allotment_date.split('T')[0] === todayStr);
+    const todayIst = getIstToday();
+    const hasIpoAllotmentDate = Boolean(ipo.allotment_date);
+    const ipoAllotmentDateStr = ipo.allotment_date ? ipo.allotment_date.split('T')[0] : null;
+    const isIpoAllotmentDateReached = Boolean(ipoAllotmentDateStr && todayIst >= ipoAllotmentDateStr);
+    const isIpoAllotmentToday = Boolean(ipoAllotmentDateStr && ipoAllotmentDateStr === todayIst);
 
     // Filter userPans by search query
     const filteredPans = userPans.filter((p) => {
@@ -193,7 +197,7 @@ export default function IpoShow({
     const [settleActualPayout, setSettleActualPayout] = useState('');
     const [settleNetEarnings, setSettleNetEarnings] = useState('');
     const [settleCapitalReturned, setSettleCapitalReturned] = useState('');
-    const [settleDate, setSettleDate] = useState(new Date().toISOString().split('T')[0]);
+    const [settleDate, setSettleDate] = useState(todayIst);
     const [settleNotes, setSettleNotes] = useState('');
 
     // Delete batch modal
@@ -223,13 +227,34 @@ export default function IpoShow({
         setAllotmentResult(null);
 
         try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const response = await fetch(`/applications/${batch.id}/check-allotment`, {
+                method: 'POST',
                 headers: {
                     'Accept': 'application/json',
+                    'Content-Type': 'application/json',
                     'X-Requested-With': 'XMLHttpRequest',
+                    ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
                 },
             });
-            const data = await response.json();
+
+            if (response.status === 404) {
+                setAllotmentResult({
+                    success: false,
+                    message: `Application #${batch.batch_number || batch.id} was not found on the server. Please reload the page to refresh records.`,
+                });
+                return;
+            }
+
+            const data = await response.json().catch(() => null);
+            if (!data) {
+                setAllotmentResult({
+                    success: false,
+                    message: `Server returned error (${response.status}). Please try again.`,
+                });
+                return;
+            }
+
             setAllotmentResult({
                 ...data,
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
@@ -587,17 +612,19 @@ export default function IpoShow({
                                     )}
                                 </Button>
 
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={handleCheckAllAllotments}
-                                    disabled={isCheckingAllAllotments}
-                                    className="border-sky-300 text-sky-700 bg-sky-50/80 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 text-xs h-9"
-                                    title="Check and scrape all application PANs against KFintech portal"
-                                >
-                                    <RefreshCw className={`mr-1.5 h-3.5 w-3.5 text-sky-600 ${isCheckingAllAllotments ? 'animate-spin' : ''}`} />
-                                    {isCheckingAllAllotments ? 'Checking...' : 'Check All KFintech'}
-                                </Button>
+                                {hasIpoAllotmentDate && (isIpoAllotmentDateReached || isAdmin) && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleCheckAllAllotments}
+                                        disabled={isCheckingAllAllotments}
+                                        className="border-sky-300 text-sky-700 bg-sky-50/80 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 text-xs h-9"
+                                        title="Check and scrape all application PANs against KFintech portal"
+                                    >
+                                        <RefreshCw className={`mr-1.5 h-3.5 w-3.5 text-sky-600 ${isCheckingAllAllotments ? 'animate-spin' : ''}`} />
+                                        {isCheckingAllAllotments ? 'Checking...' : 'Check All KFintech'}
+                                    </Button>
+                                )}
 
                                 <Button
                                     variant="outline"
@@ -1244,11 +1271,22 @@ export default function IpoShow({
 
                                                 const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
+                                                const hasAllotmentDate = Boolean(batch.ipo?.allotment_date || ipo.allotment_date);
+                                                const allotmentDateStr = (batch.ipo?.allotment_date || ipo.allotment_date)?.split('T')[0] ?? null;
+                                                const isAllotmentDateReached = Boolean(allotmentDateStr && todayIst >= allotmentDateStr);
+                                                const isBatchAllotmentToday = Boolean(allotmentDateStr && allotmentDateStr === todayIst);
+                                                const showAllotmentButton = Boolean(
+                                                    panNumberRaw &&
+                                                    batch.application_status !== 'cancelled' &&
+                                                    hasAllotmentDate &&
+                                                    (isAllotmentDateReached || isAdmin)
+                                                );
+
                                                 return (
                                                     <tr
                                                         key={batch.id}
                                                         className={`transition-colors ${
-                                                            isIpoAllotmentToday
+                                                            isBatchAllotmentToday
                                                                 ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70 border-l-4 border-l-amber-500'
                                                                 : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
                                                         }`}
@@ -1261,11 +1299,15 @@ export default function IpoShow({
                                                                 <span className="font-mono text-[11px] text-neutral-400">
                                                                     {batch.batch_number} · {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
                                                                 </span>
-                                                                {isIpoAllotmentToday && (
+                                                                {isBatchAllotmentToday ? (
                                                                     <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-4">
                                                                         <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Allotment Today
                                                                     </Badge>
-                                                                )}
+                                                                ) : hasAllotmentDate ? (
+                                                                    <span className="text-[10px] text-neutral-400 font-sans">
+                                                                        Allotment: {formatIstDate(allotmentDateStr)}
+                                                                    </span>
+                                                                ) : null}
                                                             </div>
                                                         </td>
                                                         <td className="py-3 px-3">
@@ -1424,20 +1466,20 @@ export default function IpoShow({
                                                                     </>
                                                                 )}
 
-                                                                {/* KFintech Allotment Check Button */}
-                                                                {panNumberRaw && batch.application_status !== 'cancelled' && (
+                                                                {/* KFintech Allotment Check Button (Only visible when allotment date is present and reached) */}
+                                                                {showAllotmentButton && (
                                                                     <Button
                                                                         size="sm"
-                                                                        variant={isIpoAllotmentToday ? 'default' : 'outline'}
+                                                                        variant={isBatchAllotmentToday ? 'default' : 'outline'}
                                                                         onClick={() => handleCheckAllotment(batch)}
                                                                         className={`h-7 px-2.5 text-xs font-semibold ${
-                                                                            isIpoAllotmentToday
+                                                                            isBatchAllotmentToday
                                                                                 ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
                                                                                 : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
                                                                         }`}
-                                                                        title={isIpoAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : 'Live scrape allotment status from KFintech portal'}
+                                                                        title={isBatchAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : `Check KFintech allotment status (Allotment: ${formatIstDate(allotmentDateStr)})`}
                                                                     >
-                                                                        <Search className={`h-3 w-3 mr-1 ${isIpoAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
+                                                                        <Search className={`h-3 w-3 mr-1 ${isBatchAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
                                                                     </Button>
                                                                 )}
 

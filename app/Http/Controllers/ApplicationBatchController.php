@@ -20,7 +20,7 @@ class ApplicationBatchController extends Controller
     {
         $user = $request->user();
         $isAdmin = $user->isAdmin();
-        $today = now()->format('Y-m-d');
+        $today = now('Asia/Kolkata')->format('Y-m-d');
 
         $query = ApplicationBatch::with(['ipo', 'user', 'rate', 'batchPans.userPan', 'settlement']);
 

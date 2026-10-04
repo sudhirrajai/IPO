@@ -43,6 +43,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import AppLayout from '@/layouts/app-layout';
+import { formatIstDate, formatIstDateTime, getIstToday } from '@/lib/utils';
 import type { ApplicationBatch, BreadcrumbItem, Ipo, User, UserPan } from '@/types';
 
 interface ApplicationsIndexProps {
@@ -119,9 +120,9 @@ export default function ApplicationsIndex({
     // PAN copy indicator
     const [copiedPan, setCopiedPan] = useState<string | null>(null);
 
-    // Today date check
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todayAllotmentIpos = ipos.filter((ipo) => ipo.allotment_date?.split('T')[0] === todayStr);
+    // Today date check in Indian Standard Time (Asia/Kolkata)
+    const todayIst = getIstToday();
+    const todayAllotmentIpos = ipos.filter((ipo) => ipo.allotment_date?.split('T')[0] === todayIst);
 
     const copyPan = (pan: string) => {
         navigator.clipboard.writeText(pan);
@@ -169,13 +170,34 @@ export default function ApplicationsIndex({
         setAllotmentResult(null);
 
         try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const response = await fetch(`/applications/${batch.id}/check-allotment`, {
+                method: 'POST',
                 headers: {
                     'Accept': 'application/json',
+                    'Content-Type': 'application/json',
                     'X-Requested-With': 'XMLHttpRequest',
+                    ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
                 },
             });
-            const data = await response.json();
+
+            if (response.status === 404) {
+                setAllotmentResult({
+                    success: false,
+                    message: `Application #${batch.batch_number || batch.id} was not found on the server. Please reload the page to refresh records.`,
+                });
+                return;
+            }
+
+            const data = await response.json().catch(() => null);
+            if (!data) {
+                setAllotmentResult({
+                    success: false,
+                    message: `Server returned error (${response.status}). Please try again.`,
+                });
+                return;
+            }
+
             setAllotmentResult({
                 ...data,
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
@@ -571,9 +593,16 @@ export default function ApplicationsIndex({
                                             const isPending = !isAllotted && !isNotAllotted && batch.application_status !== 'cancelled' && !isPendingApproval;
                                             const appAmount = Number(batch.ipo_amount || batch.capital_amount || 0);
 
-                                            const isAllotmentToday = batch.ipo?.allotment_date
-                                                ? batch.ipo.allotment_date.split('T')[0] === todayStr
-                                                : false;
+                                            const hasAllotmentDate = Boolean(batch.ipo?.allotment_date);
+                                            const allotmentDateStr = batch.ipo?.allotment_date ? batch.ipo.allotment_date.split('T')[0] : null;
+                                            const isAllotmentDateReached = Boolean(allotmentDateStr && todayIst >= allotmentDateStr);
+                                            const isAllotmentToday = Boolean(allotmentDateStr && allotmentDateStr === todayIst);
+                                            const showAllotmentButton = Boolean(
+                                                panNumberRaw &&
+                                                batch.application_status !== 'cancelled' &&
+                                                hasAllotmentDate &&
+                                                (isAllotmentDateReached || isAdmin)
+                                            );
 
                                             return (
                                                 <tr
@@ -636,15 +665,19 @@ export default function ApplicationsIndex({
                                                         <Link href={`/ipos/${batch.ipo_id}`} className="hover:underline text-blue-600 dark:text-blue-400">
                                                             {batch.ipo?.company_name}
                                                         </Link>
-                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                                             <span className="text-[11px] text-neutral-400 block">
                                                                 {batch.application_count} lot(s) ({batch.application_count * (batch.ipo?.lot_size || 1)} sh)
                                                             </span>
-                                                            {isAllotmentToday && (
+                                                            {isAllotmentToday ? (
                                                                 <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-4">
                                                                     <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Allotment Today
                                                                 </Badge>
-                                                            )}
+                                                            ) : hasAllotmentDate ? (
+                                                                <span className="text-[10px] text-neutral-400 font-sans">
+                                                                    Allotment: {formatIstDate(allotmentDateStr)}
+                                                                </span>
+                                                            ) : null}
                                                         </div>
                                                     </td>
                                                     <td className="py-3 px-4">
@@ -773,8 +806,8 @@ export default function ApplicationsIndex({
                                                                 </>
                                                             )}
 
-                                                            {/* Check Allotment Button (Live KFintech Scraper) */}
-                                                            {panNumberRaw && batch.application_status !== 'cancelled' && (
+                                                            {/* Check Allotment Button (Only visible when allotment date is present and reached) */}
+                                                            {showAllotmentButton && (
                                                                 <Button
                                                                     size="sm"
                                                                     variant={isAllotmentToday ? 'default' : 'outline'}
@@ -784,7 +817,7 @@ export default function ApplicationsIndex({
                                                                             ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
                                                                             : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
                                                                     }`}
-                                                                    title={isAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : 'Live scrape allotment status from KFintech portal'}
+                                                                    title={isAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : `Live query KFintech (Allotment: ${formatIstDate(allotmentDateStr)})`}
                                                                 >
                                                                     <Search className={`h-3 w-3 mr-1 ${isAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
                                                                 </Button>

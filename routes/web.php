@@ -30,7 +30,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/applications', [ApplicationBatchController::class, 'store'])->name('applications.store');
     Route::post('/applications/{batch}/cancel', [ApplicationBatchController::class, 'cancel'])->name('applications.cancel');
     Route::delete('/applications/{batch}', [ApplicationBatchController::class, 'destroy'])->name('applications.destroy');
-    Route::match(['get', 'post'], '/applications/{batch}/check-allotment', [ApplicationBatchController::class, 'checkAllotment'])->name('applications.check-allotment');
+    Route::match(['get', 'post'], '/applications/{batch}/check-allotment', [ApplicationBatchController::class, 'checkAllotment'])
+        ->name('applications.check-allotment')
+        ->missing(function () {
+            return response()->json([
+                'success' => false,
+                'message' => 'This application record was not found or has been deleted.',
+            ], 404);
+        });
     Route::post('/applications/{batch}/pan', [ApplicationBatchController::class, 'updatePan'])->name('applications.pan');
     Route::post('/applications/{batch}/approve', [ApplicationBatchController::class, 'approve'])->name('applications.approve');
     Route::post('/applications/{batch}/reject', [ApplicationBatchController::class, 'reject'])->name('applications.reject');
