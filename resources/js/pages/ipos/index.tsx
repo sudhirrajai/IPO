@@ -97,12 +97,13 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
     const { auth } = usePage<{ auth: { user: User } }>().props;
     const isAdmin = auth.user?.role === 'admin';
 
-    const [search, setSearch] = useState(filters.search || '');
+    const initialSearch = typeof filters?.search === 'string' ? filters.search : '';
+    const [search, setSearch] = useState<string>(initialSearch);
     const [searchCountdown, setSearchCountdown] = useState<number | null>(null);
 
     // Auto-search 5 seconds after typing stopped
     useEffect(() => {
-        const currentAppliedSearch = filters.search || '';
+        const currentAppliedSearch = typeof filters?.search === 'string' ? filters.search : '';
         if (search === currentAppliedSearch) {
             setSearchCountdown(null);
             return;
@@ -122,11 +123,17 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
             clearTimeout(timer);
             clearInterval(interval);
         };
-    }, [search, filters.search]);
+    }, [search, filters?.search]);
 
-    const [statusFilter, setStatusFilter] = useState(filters.status || 'all');
-    const [typeFilter, setTypeFilter] = useState(filters.type || 'all');
-    const [sortFilter, setSortFilter] = useState(filters.sort || 'default');
+    const initialStatus = typeof filters?.status === 'string' ? filters.status : 'all';
+    const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
+
+    const initialType = typeof filters?.type === 'string' ? filters.type : 'all';
+    const [typeFilter, setTypeFilter] = useState<string>(initialType);
+
+    const initialSort = typeof filters?.sort === 'string' ? filters.sort : 'default';
+    const [sortFilter, setSortFilter] = useState<string>(initialSort);
+
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [copiedIpoId, setCopiedIpoId] = useState<number | null>(null);
@@ -153,7 +160,7 @@ export default function IposIndex({ ipos, counts, filters }: IposIndexProps) {
 
     const [favoritesMap, setFavoritesMap] = useState<Record<number, boolean>>(() => {
         const map: Record<number, boolean> = {};
-        ipos.data.forEach((item) => {
+        (ipos?.data || []).forEach((item) => {
             map[item.id] = Boolean(item.is_favorite);
         });
         return map;

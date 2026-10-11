@@ -91,7 +91,12 @@ class IpoController extends Controller
         return Inertia::render('ipos/index', [
             'ipos' => $ipos,
             'counts' => $counts,
-            'filters' => $request->only(['status', 'type', 'search', 'sort']),
+            'filters' => [
+                'status' => $request->input('status', 'all'),
+                'type' => $request->input('type', 'all'),
+                'search' => $request->input('search', ''),
+                'sort' => $request->input('sort', 'default'),
+            ],
         ]);
     }
 
