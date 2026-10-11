@@ -70,18 +70,28 @@ class IpoController extends Controller
             });
         }
 
+        $sort = $request->input('sort', 'default');
+        match ($sort) {
+            'gmp_desc' => $query->orderByDesc('gmp'),
+            'gmp_asc' => $query->orderBy('gmp'),
+            'date_open' => $query->orderBy('open_date'),
+            'date_close' => $query->orderBy('close_date'),
+            'allotment' => $query->orderBy('allotment_date'),
+            'name_asc' => $query->orderBy('company_name'),
+            default => $query->orderByRaw("CASE WHEN status = 'open' THEN 1 WHEN status = 'upcoming' THEN 2 ELSE 3 END")
+                ->orderBy('open_date'),
+        };
+
         $ipos = $query->withCount(['applicationBatches as total_applications' => function ($q) {
             $q->selectRaw('COALESCE(SUM(application_count), 0)');
         }])
-            ->orderByRaw("CASE WHEN status = 'open' THEN 1 WHEN status = 'upcoming' THEN 2 ELSE 3 END")
-            ->orderBy('open_date')
-            ->paginate(12)
+            ->paginate(24)
             ->withQueryString();
 
         return Inertia::render('ipos/index', [
             'ipos' => $ipos,
             'counts' => $counts,
-            'filters' => $request->only(['status', 'type', 'search']),
+            'filters' => $request->only(['status', 'type', 'search', 'sort']),
         ]);
     }
 

@@ -49,6 +49,11 @@ class GmpScraperService
      *
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * Parse HTML and extract IPO records.
+     *
+     * @return array<int, array<string, mixed>>
+     */
     public function parseHtml(string $html): array
     {
         $dom = new DOMDocument();
@@ -66,7 +71,7 @@ class GmpScraperService
 
         foreach ($rows as $row) {
             $tds = $xpath->query('.//td', $row);
-            if ($tds->length < 5) {
+            if ($tds->length < 8) {
                 continue;
             }
 
@@ -79,18 +84,25 @@ class GmpScraperService
                 continue;
             }
 
+            // Clean common suffix tags from scraped name
+            $cleanName = preg_replace('/\s+IPOU\s*$/i', '', $companyName);
+            $cleanName = preg_replace('/\s+IPO\s+U\s*$/i', '', $cleanName);
+            $cleanName = preg_replace('/\s*\(SME\)\s*$/i', '', $cleanName);
+            $cleanName = trim($cleanName);
+
             $cellHtml = $dom->saveHTML($nameCell);
-            // Mainboard has no SME tag, SME explicitly has 'SME' in the tag/badge
-            $isSme = (stripos($cellHtml, 'SME') !== false);
+            $isSme = (stripos($cellHtml, 'SME') !== false || stripos($companyName, 'SME') !== false);
             $ipoType = $isSme ? 'sme' : 'mainboard';
 
-            // 2. GMP
+            // 2. GMP & Range
             $gmpCell = $tds->item(1);
             $gmpText = trim($gmpCell->textContent);
             $gmp = null;
             $gmpPercent = null;
+            $minGmp = null;
+            $maxGmp = null;
 
-            if (preg_match('/(?:₹|&#8377;|â‚¹|\x{20B9}|Rs\.?)?\s*([0-9\.\-]+)\s*\(([\-0-9\.]+)%\)/u', $gmpText, $m)) {
+            if (preg_match('/(?:₹|&#8377;|â‚¹|\x{20B9}|Rs\.?)?\s*([0-9\.\-]+)\s*\(([\-0-9\.]*)%\)/u', $gmpText, $m)) {
                 if ($m[1] !== '--' && is_numeric($m[1])) {
                     $gmp = (float) $m[1];
                 }
@@ -99,7 +111,16 @@ class GmpScraperService
                 }
             }
 
-            // 3. Subscription
+            if (preg_match('/([0-9\.]+)\s*(?:↓|&darr;)\s*\/\s*([0-9\.]+)\s*(?:↑|&uarr;)/u', $gmpText, $rm)) {
+                $minGmp = (float) $rm[1];
+                $maxGmp = (float) $rm[2];
+            }
+
+            // 3. Rating (Count of fire emojis)
+            $ratingCell = $tds->item(2);
+            $fireCount = substr_count($ratingCell->textContent, '🔥');
+
+            // 4. Subscription
             $subCell = $tds->item(3);
             $subText = trim($subCell->textContent);
             $subscription = null;
@@ -107,25 +128,56 @@ class GmpScraperService
                 $subscription = (float) $sm[1];
             }
 
-            // 4. Price & Lot Size
+            // 5. Price & Lot Size
             $priceText = trim($tds->item(4)->textContent);
-            $price = is_numeric($priceText) ? (float) $priceText : null;
+            $price = is_numeric($priceText) ? (float) $priceText : 0.0;
+
+            $sizeText = trim($tds->item(5)->textContent);
+            $issueSize = ($sizeText !== '-' && ! empty($sizeText)) ? $sizeText : null;
 
             $lotText = $tds->length > 6 ? str_replace(',', '', trim($tds->item(6)->textContent)) : null;
-            $lot = is_numeric($lotText) ? (int) $lotText : null;
+            $lot = (is_numeric($lotText) && (int) $lotText > 0) ? (int) $lotText : 1;
 
-            // 5. Updated On
+            // 6. Dates (Open, Close, BoA/Allotment, Listing)
+            $openDate = $tds->length > 7 ? $this->parseInvestorGainDate($tds->item(7)->textContent) : null;
+            $closeDate = $tds->length > 8 ? $this->parseInvestorGainDate($tds->item(8)->textContent) : null;
+            $boaDate = $tds->length > 9 ? $this->parseInvestorGainDate($tds->item(9)->textContent) : null;
+            $listingDate = $tds->length > 10 ? $this->parseInvestorGainDate($tds->item(10)->textContent) : null;
             $updatedOn = $tds->length > 11 ? trim($tds->item(11)->textContent) : null;
 
+            // 7. Status determination
+            $today = now()->toDateString();
+            $status = 'upcoming';
+            if ($closeDate && $closeDate < $today) {
+                $status = 'closed';
+            } elseif ($openDate && $openDate <= $today && (! $closeDate || $closeDate >= $today)) {
+                $status = 'open';
+            }
+
+            $retailGain = ($gmp !== null && $lot > 0) ? round($gmp * $lot, 2) : 0.0;
+            $hniGain = round($retailGain * 14, 2);
+
             $results[] = [
-                'name' => $companyName,
-                'clean_name' => $this->normalizeName($companyName),
+                'name' => $cleanName,
+                'raw_name' => $companyName,
+                'clean_name' => $this->normalizeName($cleanName),
                 'ipo_type' => $ipoType,
                 'gmp' => $gmp,
                 'gmp_percent' => $gmpPercent,
+                'min_gmp' => $minGmp,
+                'max_gmp' => $maxGmp,
+                'rating' => $fireCount,
                 'subscription' => $subscription,
                 'price' => $price,
+                'issue_size' => $issueSize,
                 'lot' => $lot,
+                'open_date' => $openDate,
+                'close_date' => $closeDate,
+                'boa_date' => $boaDate,
+                'listing_date' => $listingDate,
+                'status' => $status,
+                'retail_gain' => $retailGain,
+                'hni_gain' => $hniGain,
                 'raw_gmp' => $gmpText,
                 'updated_on' => $updatedOn,
             ];
@@ -135,7 +187,28 @@ class GmpScraperService
     }
 
     /**
-     * Sync scraped GMP data into local database IPOs.
+     * Parse date string formatted like "13-Oct" or "13-Oct-2026"
+     */
+    public function parseInvestorGainDate(?string $str): ?string
+    {
+        if (empty($str) || $str === '-' || trim($str) === '') {
+            return null;
+        }
+
+        $str = trim($str);
+        if (preg_match('/^(\d{1,2})-([A-Za-z]{3})(?:-(\d{2,4}))?$/', $str, $m)) {
+            $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
+            $month = date('m', strtotime($m[2].' 1 2026'));
+            $year = ! empty($m[3]) ? (strlen($m[3]) === 2 ? '20'.$m[3] : $m[3]) : '2026';
+
+            return "{$year}-{$month}-{$day}";
+        }
+
+        return null;
+    }
+
+    /**
+     * Sync scraped GMP data into local database IPOs and ingest missing IPOs.
      *
      * @return array<string, mixed>
      */
@@ -150,6 +223,7 @@ class GmpScraperService
                 'message' => 'No GMP records could be scraped from InvestorGain.',
                 'total_scraped' => 0,
                 'matched_count' => 0,
+                'created_count' => 0,
                 'updated_count' => 0,
                 'duration_ms' => 0,
                 'matches' => [],
@@ -159,16 +233,18 @@ class GmpScraperService
         $ipos = Ipo::all();
         $matchedCount = 0;
         $updatedCount = 0;
+        $createdCount = 0;
         $matches = [];
+        $matchedScrapedNames = [];
 
         foreach ($ipos as $ipo) {
             $match = $this->findBestMatch($ipo, $scrapedItems);
 
             if ($match) {
                 $matchedCount++;
+                $matchedScrapedNames[] = $match['name'];
                 $hasChanged = false;
                 $previousGmp = $ipo->gmp;
-                $previousSub = $ipo->total_subscription;
 
                 // Update GMP if scraped value is provided
                 if ($match['gmp'] !== null) {
@@ -179,12 +255,47 @@ class GmpScraperService
                     }
                 }
 
-                // Update total subscription if available from scraper
-                if ($match['subscription'] !== null && $match['subscription'] > 0) {
-                    $subStr = (string) $match['subscription'];
-                    if ($ipo->total_subscription !== $subStr) {
+                // Update lot_size if not set or 1
+                if (($ipo->lot_size <= 1 || empty($ipo->lot_size)) && ! empty($match['lot']) && $match['lot'] > 1) {
+                    $ipo->lot_size = (int) $match['lot'];
+                    $hasChanged = true;
+                }
+
+                // Update price / issue_price if empty
+                if ((empty($ipo->issue_price) || (float) $ipo->issue_price == 0) && ! empty($match['price']) && $match['price'] > 0) {
+                    $ipo->issue_price = (float) $match['price'];
+                    $ipo->price_band_max = (float) $match['price'];
+                    $hasChanged = true;
+                }
+
+                // Update dates if missing
+                if (empty($ipo->open_date) && ! empty($match['open_date'])) {
+                    $ipo->open_date = $match['open_date'];
+                    $hasChanged = true;
+                }
+                if (empty($ipo->close_date) && ! empty($match['close_date'])) {
+                    $ipo->close_date = $match['close_date'];
+                    $hasChanged = true;
+                }
+                if (empty($ipo->allotment_date) && ! empty($match['boa_date'])) {
+                    $ipo->allotment_date = $match['boa_date'];
+                    $hasChanged = true;
+                }
+                if (empty($ipo->listing_date) && ! empty($match['listing_date'])) {
+                    $ipo->listing_date = $match['listing_date'];
+                    $hasChanged = true;
+                }
+                if (empty($ipo->issue_size) && ! empty($match['issue_size'])) {
+                    if (preg_match('/([0-9\.]+)/', str_replace(',', '', $match['issue_size']), $sm)) {
+                        $ipo->issue_size = (float) $sm[1];
                         $hasChanged = true;
                     }
+                }
+
+                // Update status if date-based status is clearer and not manually closed
+                if (! empty($match['status']) && $ipo->status !== $match['status'] && ! in_array($ipo->status, ['closed', 'allotted', 'listed'])) {
+                    $ipo->status = $match['status'];
+                    $hasChanged = true;
                 }
 
                 // Update raw_provider_data payload
@@ -194,30 +305,18 @@ class GmpScraperService
                 }
                 $raw['gmp_source'] = 'investorgain';
                 $raw['gmp_scraped_at'] = now()->toIso8601String();
-                if ($match['gmp_percent'] !== null) {
-                    $raw['gmp_percent'] = $match['gmp_percent'];
-                }
+                $raw['gmp_percent'] = $match['gmp_percent'];
+                $raw['gmp_rating'] = $match['rating'] ?? 0;
+                $raw['gmp_updated_on'] = $match['updated_on'];
                 $raw['gmp_raw'] = $match['raw_gmp'];
+                $raw['min_gmp'] = $match['min_gmp'];
+                $raw['max_gmp'] = $match['max_gmp'];
+                $raw['retail_gain'] = $match['retail_gain'];
+                $raw['hni_gain'] = $match['hni_gain'];
                 $ipo->raw_provider_data = $raw;
 
-                if ($hasChanged || ! isset($ipo->getOriginal()['raw_provider_data']['gmp_scraped_at'])) {
-                    $ipo->save();
-                    $updatedCount++;
-
-                    AuditLog::create([
-                        'user_id' => auth()->id(),
-                        'action' => 'gmp_auto_synced',
-                        'entity_type' => Ipo::class,
-                        'entity_id' => $ipo->id,
-                        'details' => [
-                            'source' => 'investorgain',
-                            'previous_gmp' => $previousGmp,
-                            'new_gmp' => $ipo->gmp,
-                            'subscription' => $ipo->total_subscription,
-                            'matched_name' => $match['name'],
-                        ],
-                    ]);
-                }
+                $ipo->save();
+                $updatedCount++;
 
                 $matches[] = [
                     'ipo_id' => $ipo->id,
@@ -230,19 +329,84 @@ class GmpScraperService
             }
         }
 
+        // Ingest missing IPOs directly from InvestorGain
+        foreach ($scrapedItems as $item) {
+            if (in_array($item['name'], $matchedScrapedNames, true)) {
+                continue;
+            }
+
+            $symbol = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $item['name']), 0, 10));
+
+            $numericIssueSize = null;
+            if (! empty($item['issue_size'])) {
+                if (preg_match('/([0-9\.]+)/', str_replace(',', '', $item['issue_size']), $sm)) {
+                    $numericIssueSize = (float) $sm[1];
+                }
+            }
+
+            $createdIpo = Ipo::create([
+                'company_name' => $item['name'],
+                'symbol' => $symbol,
+                'exchange' => 'NSE/BSE',
+                'ipo_type' => $item['ipo_type'],
+                'category' => $item['ipo_type'] === 'sme' ? 'SME' : 'Mainboard',
+                'open_date' => $item['open_date'],
+                'close_date' => $item['close_date'],
+                'allotment_date' => $item['boa_date'],
+                'listing_date' => $item['listing_date'],
+                'price_band_min' => $item['price'] > 0 ? $item['price'] : null,
+                'price_band_max' => $item['price'] > 0 ? $item['price'] : null,
+                'issue_price' => $item['price'] > 0 ? $item['price'] : null,
+                'lot_size' => $item['lot'] ?: 1,
+                'issue_size' => $numericIssueSize,
+                'gmp' => $item['gmp'],
+                'status' => $item['status'],
+                'provider' => 'investorgain',
+                'provider_id' => strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $item['name'])),
+                'raw_provider_data' => [
+                    'total_subscription' => $item['subscription'] ? (string) $item['subscription'] : null,
+                    'issue_size_text' => $item['issue_size'],
+                    'gmp_percent' => $item['gmp_percent'],
+                    'gmp_rating' => $item['rating'] ?? 0,
+                    'gmp_updated_on' => $item['updated_on'],
+                    'gmp_raw' => $item['raw_gmp'],
+                    'min_gmp' => $item['min_gmp'],
+                    'max_gmp' => $item['max_gmp'],
+                    'retail_gain' => $item['retail_gain'],
+                    'hni_gain' => $item['hni_gain'],
+                    'gmp_source' => 'investorgain',
+                    'gmp_scraped_at' => now()->toIso8601String(),
+                ],
+                'accept_fix_applications' => true,
+                'auto_approve_fix' => true,
+                'last_synced_at' => now(),
+            ]);
+
+            $createdCount++;
+            $matches[] = [
+                'ipo_id' => $createdIpo->id,
+                'company_name' => $createdIpo->company_name,
+                'matched_with' => $item['name'],
+                'gmp' => $createdIpo->gmp,
+                'subscription' => null,
+                'changed' => true,
+            ];
+        }
+
         $durationMs = (int) round((microtime(true) - $startTime) * 1000);
 
         // Record SyncLog
         SyncLog::create([
             'provider' => 'investorgain_gmp',
             'status' => 'success',
-            'ipos_created' => 0,
+            'ipos_created' => $createdCount,
             'ipos_updated' => $updatedCount,
             'execution_time_ms' => $durationMs,
-            'triggered_by' => auth()->id(),
+            'triggered_by_user_id' => auth()->id(),
             'payload_summary' => [
                 'total_scraped' => count($scrapedItems),
                 'matched' => $matchedCount,
+                'created' => $createdCount,
                 'updated' => $updatedCount,
             ],
         ]);
@@ -251,15 +415,17 @@ class GmpScraperService
         AppSetting::set('last_gmp_scrape_stats', json_encode([
             'total_scraped' => count($scrapedItems),
             'matched' => $matchedCount,
+            'created' => $createdCount,
             'updated' => $updatedCount,
             'duration_ms' => $durationMs,
         ]));
 
         return [
             'success' => true,
-            'message' => "InvestorGain GMP scrape complete: {$matchedCount} matched, {$updatedCount} updated.",
+            'message' => "InvestorGain Live Scrape complete: {$createdCount} new created, {$updatedCount} updated ({$matchedCount} matched).",
             'total_scraped' => count($scrapedItems),
             'matched_count' => $matchedCount,
+            'created_count' => $createdCount,
             'updated_count' => $updatedCount,
             'duration_ms' => $durationMs,
             'matches' => $matches,

@@ -61,10 +61,15 @@ class ApplicationBatchService
         $gmpSnapshot = (float) ($ipo->gmp ?? 0);
         $expectedListingGain = round($lotSize * $gmpSnapshot * $count, 2);
 
+        if (! $isAdmin && ! ($ipo->accept_fix_applications ?? true)) {
+            throw new InvalidArgumentException("Accepting applications for {$ipo->company_name} is currently disabled by the administrator.");
+        }
+
+        if (! $isAdmin && $ipo->status === 'closed') {
+            throw new InvalidArgumentException("IPO {$ipo->company_name} is closed and no longer accepting applications.");
+        }
+
         if ($profitSharingType === 'fix') {
-            if (! $isAdmin && ! ($ipo->accept_fix_applications ?? true)) {
-                throw new InvalidArgumentException("Fixed rate applications are currently paused by the admin for {$ipo->company_name}. Please choose another profit sharing model.");
-            }
 
             // Flat profit sharing payout decided
             $userPayout = round($profitSharingValue * $count, 2);

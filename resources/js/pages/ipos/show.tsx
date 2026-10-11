@@ -24,6 +24,7 @@ import {
     History,
     Landmark,
     Layers,
+    Lock,
     Percent,
     PieChart,
     Plus,
@@ -903,16 +904,30 @@ export default function IpoShow({
                         )}
 
                         <Button
+                            disabled={!isAdmin && ipo.accept_fix_applications === false}
                             onClick={() => {
+                                if (!isAdmin && ipo.accept_fix_applications === false) return;
                                 setApplicantName(auth.user.name || '');
                                 setBatchUserId(isAdmin ? (usersList[0]?.id ? String(usersList[0].id) : '') : String(auth.user.id));
                                 setBatchFunding(isAdmin ? 'my_money' : 'user_money');
                                 setIsBatchModalOpen(true);
                             }}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                            className={!isAdmin && ipo.accept_fix_applications === false
+                                ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed border border-neutral-300 dark:border-neutral-700 shadow-none"
+                                : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+                            }
                         >
-                            <Plus className="mr-2 h-4 w-4" />
-                            {isAdmin ? 'Record Application' : 'Apply for IPO'}
+                            {!isAdmin && ipo.accept_fix_applications === false ? (
+                                <>
+                                    <Lock className="mr-2 h-4 w-4" />
+                                    Applications Closed
+                                </>
+                            ) : (
+                                <>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    {isAdmin ? 'Record Application' : 'Apply for IPO'}
+                                </>
+                            )}
                         </Button>
                     </div>
                 </div>
@@ -1403,14 +1418,29 @@ export default function IpoShow({
                                         {/* Direct Action Button */}
                                         <Button
                                             type="button"
+                                            disabled={!isAdmin && ipo.accept_fix_applications === false}
                                             onClick={() => {
+                                                if (!isAdmin && ipo.accept_fix_applications === false) return;
                                                 setBatchCount(String(calculatorLots));
                                                 setIsBatchModalOpen(true);
                                             }}
-                                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-9"
+                                            className={`w-full text-xs h-9 ${
+                                                !isAdmin && ipo.accept_fix_applications === false
+                                                    ? 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed border border-neutral-300 dark:border-neutral-700'
+                                                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                            }`}
                                         >
-                                            <Plus className="mr-1.5 h-3.5 w-3.5" />
-                                            Apply for {calculatorLots} {calculatorLots === 1 ? 'Lot' : 'Lots'}
+                                            {!isAdmin && ipo.accept_fix_applications === false ? (
+                                                <>
+                                                    <Lock className="mr-1.5 h-3.5 w-3.5" />
+                                                    Applications Closed
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                                                    Apply for {calculatorLots} {calculatorLots === 1 ? 'Lot' : 'Lots'}
+                                                </>
+                                            )}
                                         </Button>
                                     </div>
                                 </div>
@@ -1895,10 +1925,25 @@ export default function IpoShow({
                                     </Button>
                                     <Button
                                         size="sm"
-                                        onClick={() => setIsBatchModalOpen(true)}
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8"
+                                        disabled={!isAdmin && ipo.accept_fix_applications === false}
+                                        onClick={() => {
+                                            if (!isAdmin && ipo.accept_fix_applications === false) return;
+                                            setIsBatchModalOpen(true);
+                                        }}
+                                        className={!isAdmin && ipo.accept_fix_applications === false
+                                            ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed border border-neutral-300 dark:border-neutral-700 text-xs h-8"
+                                            : "bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8"
+                                        }
                                     >
-                                        <Plus className="mr-1.5 h-3.5 w-3.5" /> + Fill Application
+                                        {!isAdmin && ipo.accept_fix_applications === false ? (
+                                            <>
+                                                <Lock className="mr-1.5 h-3.5 w-3.5" /> Closed
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Plus className="mr-1.5 h-3.5 w-3.5" /> + Fill Application
+                                            </>
+                                        )}
                                     </Button>
                                 </div>
                             </CardHeader>
@@ -2483,6 +2528,15 @@ export default function IpoShow({
                                 : `Submit your application for ${ipo.company_name}. Payouts are finalized on Listing Day + T+1.`}
                         </DialogDescription>
                     </DialogHeader>
+
+                    {!isAdmin && ipo.accept_fix_applications === false && (
+                        <div className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 flex items-center gap-2">
+                            <Lock className="h-4 w-4 shrink-0 text-rose-600" />
+                            <span>
+                                <strong>Applications Paused:</strong> Accepting applications for {ipo.company_name} is currently disabled by the administrator. New submissions cannot be processed.
+                            </span>
+                        </div>
+                    )}
 
                     {/* Mode Selector: Single Application vs Bulk Apply */}
                     <div className="flex rounded-lg bg-neutral-100 dark:bg-neutral-800/80 p-1 my-1">
@@ -3187,15 +3241,18 @@ export default function IpoShow({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={!ipo.active_rate}
+                                    disabled={!ipo.active_rate || (!isAdmin && ipo.accept_fix_applications === false)}
                                     onClick={() => setProfitSharingType('rate_margin')}
                                     className={`py-2 px-2.5 text-xs font-medium rounded-lg border text-center transition ${
                                         profitSharingType === 'rate_margin'
                                             ? 'border-emerald-600 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 font-semibold'
-                                            : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 hover:bg-neutral-50 dark:hover:bg-neutral-900 disabled:opacity-40'
+                                            : 'border-neutral-200 dark:border-neutral-800 text-neutral-600 hover:bg-neutral-50 dark:hover:bg-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed'
                                     }`}
                                 >
                                     {isAdmin ? 'Fixed Rate Margin' : `Published Rate (₹${activePublishedRate})`}
+                                    {!isAdmin && ipo.accept_fix_applications === false && (
+                                        <span className="block text-[9px] text-rose-500 font-normal">Closed</span>
+                                    )}
                                 </button>
                             </div>
 
@@ -3354,12 +3411,17 @@ export default function IpoShow({
                             </Button>
                             <Button
                                 type="submit"
-                                disabled={applyMode === 'bulk' && selectedBulkPanIds.length === 0}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                                disabled={(!isAdmin && ipo.accept_fix_applications === false) || (applyMode === 'bulk' && selectedBulkPanIds.length === 0)}
+                                className={!isAdmin && ipo.accept_fix_applications === false
+                                    ? "bg-neutral-300 dark:bg-neutral-800 text-neutral-500 cursor-not-allowed font-medium"
+                                    : "bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                                }
                             >
-                                {applyMode === 'bulk'
-                                    ? `Create ${selectedBulkPanIds.length} Applications (${selectedBulkPanIds.length} PANs)`
-                                    : (isAdmin ? 'Record Application' : 'Submit Application')}
+                                {!isAdmin && ipo.accept_fix_applications === false
+                                    ? 'Applications Closed'
+                                    : applyMode === 'bulk'
+                                        ? `Create ${selectedBulkPanIds.length} Applications (${selectedBulkPanIds.length} PANs)`
+                                        : (isAdmin ? 'Record Application' : 'Submit Application')}
                             </Button>
                         </DialogFooter>
                     </form>

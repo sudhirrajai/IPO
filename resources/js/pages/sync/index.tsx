@@ -142,14 +142,20 @@ export default function SyncIndex({ currentProvider, credentials, lastGmpScrapeA
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="mock">Mock Sandbox Feeder (Offline / Demo)</SelectItem>
+                                            <SelectItem value="investorgain">InvestorGain Live Scraper (Real-time GMP & IPOs)</SelectItem>
                                             <SelectItem value="ipoalerts">IPO Alerts API (https://ipoalerts.in)</SelectItem>
                                             <SelectItem value="upstox">Upstox Market API (v2)</SelectItem>
                                         </SelectContent>
                                     </Select>
-                                    <Badge variant="outline" className="text-xs uppercase font-mono py-1 px-2.5">
+                                    <Badge variant="outline" className="text-xs uppercase font-mono py-1 px-2.5 w-fit">
                                         Current: {selectedProvider}
                                     </Badge>
                                 </div>
+                                {selectedProvider === 'investorgain' && (
+                                    <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/40 p-2.5 rounded-lg border border-blue-200/60 dark:border-blue-900/40">
+                                        ✨ <strong>InvestorGain Active:</strong> No API key needed. All live Mainboard & SME IPOs, real-time GMP premiums, dates, and lots will be automatically fetched and kept in sync directly from InvestorGain.
+                                    </p>
+                                )}
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-3 border-t border-neutral-100 dark:border-neutral-800">
@@ -334,29 +340,72 @@ export default function SyncIndex({ currentProvider, credentials, lastGmpScrapeA
                         {logs.length === 0 ? (
                             <p className="py-8 text-center text-sm text-neutral-500">No synchronization records yet.</p>
                         ) : (
-                            <table className="w-full text-left text-sm">
-                                <thead className="border-b border-neutral-200 bg-neutral-50/50 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50">
-                                    <tr>
-                                        <th className="py-3 px-3 w-12 text-center">#</th>
-                                        <th className="py-3 px-4">Provider</th>
-                                        <th className="py-3 px-4">Status</th>
-                                        <th className="py-3 px-4">Created</th>
-                                        <th className="py-3 px-4">Updated</th>
-                                        <th className="py-3 px-4">Execution Time</th>
-                                        <th className="py-3 px-4">Triggered By</th>
-                                        <th className="py-3 px-4">Date & Time</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                            <>
+                                {/* Desktop Table */}
+                                <div className="hidden md:block overflow-x-auto w-full">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="border-b border-neutral-200 bg-neutral-50/50 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50">
+                                            <tr>
+                                                <th className="py-3 px-3 w-12 text-center">#</th>
+                                                <th className="py-3 px-4">Provider</th>
+                                                <th className="py-3 px-4">Status</th>
+                                                <th className="py-3 px-4">Created</th>
+                                                <th className="py-3 px-4">Updated</th>
+                                                <th className="py-3 px-4">Execution Time</th>
+                                                <th className="py-3 px-4">Triggered By</th>
+                                                <th className="py-3 px-4">Date & Time</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                                            {logs.map((log, index) => (
+                                                <tr key={log.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
+                                                    <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
+                                                        {index + 1}
+                                                    </td>
+                                                    <td className="py-3 px-4 font-semibold uppercase text-xs">
+                                                        {log.provider}
+                                                    </td>
+                                                    <td className="py-3 px-4">
+                                                        <Badge
+                                                            className={`text-[10px] uppercase ${
+                                                                log.status === 'success'
+                                                                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                                                                    : 'bg-red-500/10 text-red-600 border-red-500/20'
+                                                            }`}
+                                                        >
+                                                            {log.status}
+                                                        </Badge>
+                                                    </td>
+                                                    <td className="py-3 px-4 font-mono font-medium">
+                                                        +{log.ipos_created}
+                                                    </td>
+                                                    <td className="py-3 px-4 font-mono font-medium">
+                                                        {log.ipos_updated}
+                                                    </td>
+                                                    <td className="py-3 px-4 font-mono text-xs text-neutral-500">
+                                                        {log.execution_time_ms} ms
+                                                    </td>
+                                                    <td className="py-3 px-4 text-xs text-neutral-600 dark:text-neutral-400">
+                                                        {log.triggered_by?.name || 'System / CLI'}
+                                                    </td>
+                                                    <td className="py-3 px-4 text-xs text-neutral-500">
+                                                        {new Date(log.created_at).toLocaleString()}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* Mobile Cards View */}
+                                <div className="block md:hidden divide-y divide-neutral-100 dark:divide-neutral-800 p-2 space-y-2.5">
                                     {logs.map((log, index) => (
-                                        <tr key={log.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50">
-                                            <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
-                                                {index + 1}
-                                            </td>
-                                            <td className="py-3 px-4 font-semibold uppercase text-xs">
-                                                {log.provider}
-                                            </td>
-                                            <td className="py-3 px-4">
+                                        <div key={log.id} className="p-3 rounded-lg border border-neutral-200/80 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/40 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-mono text-neutral-400 font-bold">#{index + 1}</span>
+                                                    <span className="font-semibold text-xs uppercase text-neutral-900 dark:text-neutral-100">{log.provider}</span>
+                                                </div>
                                                 <Badge
                                                     className={`text-[10px] uppercase ${
                                                         log.status === 'success'
@@ -366,26 +415,29 @@ export default function SyncIndex({ currentProvider, credentials, lastGmpScrapeA
                                                 >
                                                     {log.status}
                                                 </Badge>
-                                            </td>
-                                            <td className="py-3 px-4 font-mono font-medium">
-                                                +{log.ipos_created}
-                                            </td>
-                                            <td className="py-3 px-4 font-mono font-medium">
-                                                {log.ipos_updated}
-                                            </td>
-                                            <td className="py-3 px-4 font-mono text-xs text-neutral-500">
-                                                {log.execution_time_ms} ms
-                                            </td>
-                                            <td className="py-3 px-4 text-xs text-neutral-600 dark:text-neutral-400">
-                                                {log.triggered_by?.name || 'System / CLI'}
-                                            </td>
-                                            <td className="py-3 px-4 text-xs text-neutral-500">
-                                                {new Date(log.created_at).toLocaleString()}
-                                            </td>
-                                        </tr>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                                <div>
+                                                    <span className="text-[10px] text-neutral-400 block">Created / Updated</span>
+                                                    <span className="font-mono font-semibold text-neutral-700 dark:text-neutral-300">
+                                                        +{log.ipos_created} / {log.ipos_updated}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[10px] text-neutral-400 block">Duration</span>
+                                                    <span className="font-mono text-neutral-700 dark:text-neutral-300">{log.execution_time_ms} ms</span>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center justify-between text-[11px] text-neutral-400 pt-1 border-t border-neutral-200/40 dark:border-neutral-800/40">
+                                                <span>{log.triggered_by?.name || 'System / CLI'}</span>
+                                                <span>{new Date(log.created_at).toLocaleDateString()} {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            </div>
+                                        </div>
                                     ))}
-                                </tbody>
-                            </table>
+                                </div>
+                            </>
                         )}
                     </CardContent>
                 </Card>

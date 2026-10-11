@@ -48,6 +48,14 @@ export interface Ipo {
     min_retail_qty?: number | null;
     issue_size?: number | string | null;
     gmp?: number | string | null;
+    gmp_percent?: number | string | null;
+    gmp_rating?: number | null;
+    gmp_updated_on?: string | null;
+    retail_gain?: number | string | null;
+    hni_gain?: number | string | null;
+    min_gmp?: number | string | null;
+    max_gmp?: number | string | null;
+    is_favorite?: boolean;
     accept_fix_applications?: boolean;
     auto_approve_fix?: boolean;
     kfin_client_id?: string | null;

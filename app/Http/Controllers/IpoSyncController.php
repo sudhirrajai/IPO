@@ -56,7 +56,10 @@ class IpoSyncController extends Controller
         $result = $gmpScraper->syncGmpData();
 
         if ($result['success']) {
-            return back()->with('success', "InvestorGain Live GMP scraped successfully: {$result['matched_count']} IPOs matched, {$result['updated_count']} updated in {$result['duration_ms']}ms.");
+            $created = $result['created_count'] ?? 0;
+            $updated = $result['updated_count'] ?? 0;
+            $matched = $result['matched_count'] ?? 0;
+            return back()->with('success', "InvestorGain Live GMP scraped successfully: {$created} new IPOs created, {$updated} updated ({$matched} matched) in {$result['duration_ms']}ms.");
         }
 
         return back()->with('error', "GMP scrape failed: {$result['message']}");
@@ -65,7 +68,7 @@ class IpoSyncController extends Controller
     public function updateSettings(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'ipo_provider' => 'nullable|in:mock,ipoalerts,upstox',
+            'ipo_provider' => 'nullable|in:mock,ipoalerts,upstox,investorgain',
             'ipoalerts_api_key' => 'nullable|string|max:255',
             'upstox_api_key' => 'nullable|string|max:255',
             'upstox_access_token' => 'nullable|string|max:4000',

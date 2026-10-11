@@ -50,7 +50,76 @@ class Ipo extends Model
         'refund_date',
         'mandate_end_date',
         'bidding_hours',
+        'gmp_percent',
+        'gmp_rating',
+        'gmp_updated_on',
+        'retail_gain',
+        'hni_gain',
+        'min_gmp',
+        'max_gmp',
     ];
+
+    public function getGmpPercentAttribute(): ?float
+    {
+        $raw = $this->raw_provider_data ?? [];
+        if (isset($raw['gmp_percent']) && is_numeric($raw['gmp_percent'])) {
+            return (float) $raw['gmp_percent'];
+        }
+        $price = (float) ($this->price_band_max ?? $this->issue_price ?? 0);
+        $gmp = (float) ($this->gmp ?? 0);
+        if ($gmp > 0 && $price > 0) {
+            return round(($gmp / $price) * 100, 1);
+        }
+        return null;
+    }
+
+    public function getGmpRatingAttribute(): int
+    {
+        $raw = $this->raw_provider_data ?? [];
+        return isset($raw['gmp_rating']) ? (int) $raw['gmp_rating'] : 0;
+    }
+
+    public function getGmpUpdatedOnAttribute(): ?string
+    {
+        $raw = $this->raw_provider_data ?? [];
+        return $raw['gmp_updated_on'] ?? null;
+    }
+
+    public function getRetailGainAttribute(): ?float
+    {
+        $raw = $this->raw_provider_data ?? [];
+        if (isset($raw['retail_gain']) && is_numeric($raw['retail_gain'])) {
+            return (float) $raw['retail_gain'];
+        }
+        $gmp = (float) ($this->gmp ?? 0);
+        $lot = (int) ($this->lot_size ?? 1);
+        if ($gmp > 0 && $lot > 0) {
+            return round($gmp * $lot, 2);
+        }
+        return null;
+    }
+
+    public function getHniGainAttribute(): ?float
+    {
+        $raw = $this->raw_provider_data ?? [];
+        if (isset($raw['hni_gain']) && is_numeric($raw['hni_gain'])) {
+            return (float) $raw['hni_gain'];
+        }
+        $retail = $this->retail_gain;
+        return $retail ? round($retail * 14, 2) : null;
+    }
+
+    public function getMinGmpAttribute(): ?float
+    {
+        $raw = $this->raw_provider_data ?? [];
+        return isset($raw['min_gmp']) && is_numeric($raw['min_gmp']) ? (float) $raw['min_gmp'] : null;
+    }
+
+    public function getMaxGmpAttribute(): ?float
+    {
+        $raw = $this->raw_provider_data ?? [];
+        return isset($raw['max_gmp']) && is_numeric($raw['max_gmp']) ? (float) $raw['max_gmp'] : null;
+    }
 
     public function getTotalSubscriptionAttribute(): ?string
     {

@@ -25,6 +25,7 @@ class IpoSyncService
         return match (strtolower((string) $name)) {
             'ipoalerts' => new IpoAlertsProvider,
             'upstox' => new UpstoxProvider,
+            'investorgain' => new \App\Services\Providers\InvestorGainProvider,
             default => new MockIpoProvider,
         };
     }
