@@ -102,11 +102,21 @@ class ApplicationBatchController extends Controller
             ? UserPan::with('user:id,name')->where('status', 'active')->orderBy('account_holder_name')->get()
             : UserPan::where('user_id', $user->id)->where('status', 'active')->orderBy('account_holder_name')->get();
 
+        $bankAccounts = $isAdmin
+            ? \App\Models\BankAccount::where('status', 'active')->orderBy('bank_name')->get()
+            : \App\Models\BankAccount::where('user_id', $user->id)->where('status', 'active')->orderBy('bank_name')->get();
+
+        $userUpis = $isAdmin
+            ? \App\Models\UserUpi::where('status', 'active')->orderBy('upi_id')->get()
+            : \App\Models\UserUpi::where('user_id', $user->id)->where('status', 'active')->orderBy('upi_id')->get();
+
         return Inertia::render('applications/index', [
             'batches' => $batches,
             'ipos' => $ipos,
             'users' => $users,
             'userPans' => $userPans,
+            'bankAccounts' => $bankAccounts,
+            'userUpis' => $userUpis,
             'allotmentTodayCount' => $allotmentTodayCount,
             'filters' => $request->only(['ipo_id', 'user_id', 'funding_source', 'application_status', 'settlement_status', 'search', 'allotment_today', 'per_page']),
             'isAdmin' => $isAdmin,

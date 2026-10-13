@@ -80,6 +80,46 @@ class ApplicationBatch extends Model
         return $this->belongsTo(Ipo::class);
     }
 
+    public function getExpectedUserPayoutAttribute($value): float
+    {
+        if ($this->settlement_status !== 'settled' && $this->profit_sharing_type === 'percentage') {
+            if ($this->relationLoaded('ipo') && $this->ipo && $this->ipo->gmp !== null) {
+                $currentGmp = (float) $this->ipo->gmp;
+                $lotSize = (int) ($this->ipo->lot_size ?? 1);
+                $count = (int) ($this->application_count ?: 1);
+                $listingGain = round($lotSize * $currentGmp * $count, 2);
+                return round(((float) $this->profit_sharing_value / 100) * $listingGain, 2);
+            }
+        }
+
+        return (float) $value;
+    }
+
+    public function getExpectedGrossProfitAttribute($value): float
+    {
+        if ($this->settlement_status !== 'settled' && $this->profit_sharing_type === 'percentage') {
+            if ($this->relationLoaded('ipo') && $this->ipo && $this->ipo->gmp !== null) {
+                $currentGmp = (float) $this->ipo->gmp;
+                $lotSize = (int) ($this->ipo->lot_size ?? 1);
+                $count = (int) ($this->application_count ?: 1);
+                return round($lotSize * $currentGmp * $count, 2);
+            }
+        }
+
+        return (float) $value;
+    }
+
+    public function getExpectedNetEarningsAttribute($value): float
+    {
+        if ($this->settlement_status !== 'settled' && $this->profit_sharing_type === 'percentage') {
+            if ($this->relationLoaded('ipo') && $this->ipo && $this->ipo->gmp !== null) {
+                return round($this->expected_gross_profit - $this->expected_user_payout, 2);
+            }
+        }
+
+        return (float) $value;
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class)->withTrashed();

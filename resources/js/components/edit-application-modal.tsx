@@ -63,9 +63,14 @@ export default function EditApplicationModal({
     const [applicantName, setApplicantName] = useState('');
     const [selectedPanId, setSelectedPanId] = useState('custom');
     const [panNumber, setPanNumber] = useState('');
+
+    const [selectedBankId, setSelectedBankId] = useState('custom');
     const [bankName, setBankName] = useState('');
+
+    const [selectedUpiId, setSelectedUpiId] = useState('custom');
     const [upiId, setUpiId] = useState('');
     const [upiApp, setUpiApp] = useState('Auto');
+
     const [profitSharingType, setProfitSharingType] = useState<'fix' | 'percentage' | 'rate_margin'>('fix');
     const [profitSharingValue, setProfitSharingValue] = useState('');
     const [overrideTraderRate, setOverrideTraderRate] = useState('');
@@ -84,18 +89,40 @@ export default function EditApplicationModal({
         setPanNumber(currentPan);
 
         // Match with userPans
-        const matched = userPans.find((p) => p.pan_number === currentPan);
-        if (matched) {
-            setSelectedPanId(String(matched.id));
+        const matchedPan = userPans.find((p) => p.pan_number?.toUpperCase() === currentPan.toUpperCase());
+        if (matchedPan) {
+            setSelectedPanId(String(matchedPan.id));
         } else if (batch.batch_pans?.[0]?.user_pan_id) {
             setSelectedPanId(String(batch.batch_pans[0].user_pan_id));
         } else {
             setSelectedPanId('custom');
         }
 
-        setBankName(batch.bank_name || '');
-        setUpiId(batch.upi_id || '');
+        // Match with bankAccounts
+        const currentBank = batch.bank_name || '';
+        setBankName(currentBank);
+        const matchedBank = bankAccounts.find(
+            (b) => b.bank_name?.trim().toLowerCase() === currentBank.trim().toLowerCase()
+        );
+        if (matchedBank) {
+            setSelectedBankId(String(matchedBank.id));
+        } else {
+            setSelectedBankId('custom');
+        }
+
+        // Match with userUpis
+        const currentUpi = batch.upi_id || '';
+        setUpiId(currentUpi);
         setUpiApp(batch.upi_app || 'Auto');
+        const matchedUpi = userUpis.find(
+            (u) => u.upi_id?.trim().toLowerCase() === currentUpi.trim().toLowerCase()
+        );
+        if (matchedUpi) {
+            setSelectedUpiId(String(matchedUpi.id));
+        } else {
+            setSelectedUpiId('custom');
+        }
+
         setProfitSharingType((batch.profit_sharing_type as 'fix' | 'percentage' | 'rate_margin') || 'fix');
         setProfitSharingValue(batch.profit_sharing_value ? String(batch.profit_sharing_value) : '');
         setOverrideTraderRate(batch.trader_rate_snapshot ? String(batch.trader_rate_snapshot) : '');
@@ -104,7 +131,7 @@ export default function EditApplicationModal({
         setApplicationCount(batch.application_count || 1);
         setNotes(batch.notes || '');
         setErrorMessage('');
-    }, [batch, userPans]);
+    }, [batch, userPans, bankAccounts, userUpis]);
 
     // When PAN selection changes
     const handlePanSelect = (val: string) => {
@@ -121,12 +148,42 @@ export default function EditApplicationModal({
         }
     };
 
-    // Live preview calculations
-    const lotSize = Number(ipo.lot_size || 1);
-    const issuePrice = Number(ipo.issue_price || ipo.price_band_max || 0);
+    // When Bank selection changes
+    const handleBankSelect = (val: string) => {
+        setSelectedBankId(val);
+        if (val === 'custom') {
+            return;
+        }
+        const selected = bankAccounts.find((b) => String(b.id) === val);
+        if (selected) {
+            setBankName(selected.bank_name);
+            if (selected.account_holder_name && !applicantName) {
+                setApplicantName(selected.account_holder_name);
+            }
+        }
+    };
+
+    // When UPI selection changes
+    const handleUpiSelect = (val: string) => {
+        setSelectedUpiId(val);
+        if (val === 'custom') {
+            return;
+        }
+        const selected = userUpis.find((u) => String(u.id) === val);
+        if (selected) {
+            setUpiId(selected.upi_id);
+            if (selected.upi_app) {
+                setUpiApp(selected.upi_app);
+            }
+        }
+    };
+
+    // Real-time dynamic calculations
+    const lotSize = Number(ipo?.lot_size || 1);
+    const issuePrice = Number(ipo?.issue_price || ipo?.price_band_max || 0);
     const capitalPerApp = lotSize * issuePrice;
     const totalCapital = capitalPerApp * applicationCount;
-    const gmp = Number(batch.gmp_snapshot || ipo.gmp || 0);
+    const gmp = Number(ipo?.gmp !== null && ipo?.gmp !== undefined ? ipo.gmp : (batch.gmp_snapshot || 0));
     const expectedListingGain = lotSize * gmp * applicationCount;
 
     let previewUserPayout = 0;
@@ -202,19 +259,19 @@ export default function EditApplicationModal({
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 rounded-2xl">
                 <DialogHeader>
                     <div className="flex items-center justify-between gap-2">
-                        <DialogTitle className="text-lg font-bold flex items-center gap-2">
-                            <Edit3 className="h-5 w-5 text-emerald-600" />
-                            Edit Application {batch.batch_number}
+                        <DialogTitle className="text-base sm:text-lg font-bold flex items-center gap-2">
+                            <Edit3 className="h-5 w-5 text-emerald-600 shrink-0" />
+                            <span>Edit Application {batch.batch_number}</span>
                         </DialogTitle>
-                        <Badge variant="outline" className="font-mono text-xs uppercase">
+                        <Badge variant="outline" className="font-mono text-xs uppercase shrink-0">
                             Admin Only
                         </Badge>
                     </div>
-                    <DialogDescription>
-                        Update PAN card, applicant rates, profit sharing model, and banking details. Financials and settlements recalculate automatically.
+                    <DialogDescription className="text-xs sm:text-sm">
+                        Update applicant PAN, dynamic profit sharing model, and banking/UPI accounts. Payouts recalculate automatically with GMP fluctuations.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -225,11 +282,11 @@ export default function EditApplicationModal({
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
                     {/* SECTION 1: PAN & APPLICANT */}
-                    <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50/50 dark:border-neutral-800 dark:bg-neutral-900/50 space-y-3">
+                    <div className="p-3.5 sm:p-4 rounded-xl border border-neutral-200 bg-neutral-50/50 dark:border-neutral-800 dark:bg-neutral-900/50 space-y-3">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 flex items-center gap-1.5">
-                            <CreditCard className="h-3.5 w-3.5 text-blue-600" />
+                            <CreditCard className="h-3.5 w-3.5 text-blue-600 shrink-0" />
                             PAN & Applicant Identification
                         </h4>
 
@@ -255,7 +312,10 @@ export default function EditApplicationModal({
                                 <Label className="text-xs font-medium">PAN Number</Label>
                                 <Input
                                     value={panNumber}
-                                    onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
+                                    onChange={(e) => {
+                                        setPanNumber(e.target.value.toUpperCase());
+                                        setSelectedPanId('custom');
+                                    }}
                                     placeholder="e.g. ABCDE1234F"
                                     maxLength={10}
                                     className="mt-1 h-9 text-xs font-mono font-bold uppercase"
@@ -275,25 +335,25 @@ export default function EditApplicationModal({
                     </div>
 
                     {/* SECTION 2: RATES & PROFIT SHARING */}
-                    <div className="p-4 rounded-xl border border-purple-200/80 bg-purple-50/30 dark:border-purple-900/40 dark:bg-purple-950/20 space-y-3">
-                        <div className="flex items-center justify-between">
+                    <div className="p-3.5 sm:p-4 rounded-xl border border-purple-200/80 bg-purple-50/30 dark:border-purple-900/40 dark:bg-purple-950/20 space-y-3">
+                        <div className="flex items-center justify-between flex-wrap gap-1">
                             <h4 className="text-xs font-bold uppercase tracking-wider text-purple-900 dark:text-purple-300 flex items-center gap-1.5">
-                                <DollarSign className="h-3.5 w-3.5 text-purple-600" />
-                                Rates & Profit Sharing Model (Admin Override)
+                                <DollarSign className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                                Rates & Profit Sharing Model
                             </h4>
-                            <span className="text-[11px] text-purple-700 dark:text-purple-400 font-medium">
-                                GMP: ₹{gmp}
+                            <span className="text-[11px] text-purple-700 dark:text-purple-400 font-semibold bg-purple-100/70 dark:bg-purple-900/40 px-2 py-0.5 rounded-md">
+                                Live Market GMP: ₹{gmp}
                             </span>
                         </div>
 
-                        {/* Model Tabs */}
-                        <div className="grid grid-cols-3 gap-2">
+                        {/* Model Tabs (Responsive Grid) */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <button
                                 type="button"
                                 onClick={() => setProfitSharingType('fix')}
                                 className={`p-2.5 rounded-lg border text-left transition-all ${
                                     profitSharingType === 'fix'
-                                        ? 'border-purple-600 bg-white dark:bg-neutral-800 shadow-xs'
+                                        ? 'border-purple-600 bg-white dark:bg-neutral-800 shadow-xs ring-1 ring-purple-500/20'
                                         : 'border-neutral-200 bg-neutral-50/70 hover:bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-900'
                                 }`}
                             >
@@ -306,12 +366,12 @@ export default function EditApplicationModal({
                                 onClick={() => setProfitSharingType('percentage')}
                                 className={`p-2.5 rounded-lg border text-left transition-all ${
                                     profitSharingType === 'percentage'
-                                        ? 'border-purple-600 bg-white dark:bg-neutral-800 shadow-xs'
+                                        ? 'border-purple-600 bg-white dark:bg-neutral-800 shadow-xs ring-1 ring-purple-500/20'
                                         : 'border-neutral-200 bg-neutral-50/70 hover:bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-900'
                                 }`}
                             >
                                 <span className="text-xs font-bold block text-neutral-900 dark:text-neutral-100">Percentage %</span>
-                                <span className="text-[10px] text-neutral-500 block">% of listing gain</span>
+                                <span className="text-[10px] text-neutral-500 block">Dynamic % of listing gain</span>
                             </button>
 
                             <button
@@ -319,7 +379,7 @@ export default function EditApplicationModal({
                                 onClick={() => setProfitSharingType('rate_margin')}
                                 className={`p-2.5 rounded-lg border text-left transition-all ${
                                     profitSharingType === 'rate_margin'
-                                        ? 'border-purple-600 bg-white dark:bg-neutral-800 shadow-xs'
+                                        ? 'border-purple-600 bg-white dark:bg-neutral-800 shadow-xs ring-1 ring-purple-500/20'
                                         : 'border-neutral-200 bg-neutral-50/70 hover:bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-900'
                                 }`}
                             >
@@ -338,21 +398,21 @@ export default function EditApplicationModal({
                                         type="number"
                                         min="0"
                                         step="10"
-                                        placeholder="e.g. 1100"
+                                        placeholder="e.g. 1200"
                                         value={profitSharingValue}
                                         onChange={(e) => setProfitSharingValue(e.target.value)}
                                         className="h-9 pl-7 text-xs font-semibold"
                                     />
                                 </div>
                                 <span className="text-[10.5px] text-neutral-500 mt-1 block">
-                                    User gets fixed payout of ₹{Number(profitSharingValue) || 0} upon successful allotment.
+                                    Applicant gets a static payout of ₹{Number(profitSharingValue) || 0} per lot upon allotment.
                                 </span>
                             </div>
                         )}
 
                         {profitSharingType === 'percentage' && (
-                            <div>
-                                <Label className="text-xs font-medium">User Percentage of Listing Gain (%)</Label>
+                            <div className="space-y-1.5">
+                                <Label className="text-xs font-medium">User Profit Sharing Percentage (%)</Label>
                                 <div className="relative mt-1">
                                     <span className="absolute right-3 top-2 text-xs font-semibold text-neutral-400">%</span>
                                     <Input
@@ -360,15 +420,23 @@ export default function EditApplicationModal({
                                         min="1"
                                         max="100"
                                         step="1"
-                                        placeholder="e.g. 70"
+                                        placeholder="e.g. 30"
                                         value={profitSharingValue}
                                         onChange={(e) => setProfitSharingValue(e.target.value)}
                                         className="h-9 pr-7 text-xs font-semibold"
                                     />
                                 </div>
-                                <span className="text-[10.5px] text-neutral-500 mt-1 block">
-                                    User gets {Number(profitSharingValue) || 0}% of the realized listing gains.
-                                </span>
+                                <div className="rounded-lg bg-purple-100/70 dark:bg-purple-900/30 p-2.5 text-[11px] text-purple-950 dark:text-purple-200 space-y-1">
+                                    <div className="flex items-center justify-between font-semibold">
+                                        <span>Dynamic Calculation:</span>
+                                        <span className="font-mono text-emerald-700 dark:text-emerald-300">
+                                            {profitSharingValue || 0}% of ₹{expectedListingGain.toLocaleString('en-IN')} = ₹{previewUserPayout.toLocaleString('en-IN')}
+                                        </span>
+                                    </div>
+                                    <p className="text-[10px] text-neutral-600 dark:text-neutral-400 italic">
+                                        Payout dynamically adjusts with market GMP. For example, if GMP shifts from ₹4,000 to ₹3,500, a 30% share automatically updates user payout from ₹1,200 to ₹1,050.
+                                    </p>
+                                </div>
                             </div>
                         )}
 
@@ -416,7 +484,98 @@ export default function EditApplicationModal({
                         )}
                     </div>
 
-                    {/* SECTION 3: BANK & LOT CONFIGURATION */}
+                    {/* SECTION 3: BANK & UPI SELECTION (DROPDOWNS) */}
+                    <div className="p-3.5 sm:p-4 rounded-xl border border-neutral-200 bg-neutral-50/50 dark:border-neutral-800 dark:bg-neutral-900/50 space-y-3">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 flex items-center gap-1.5">
+                            <Landmark className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                            Saved Bank Account & UPI Setup
+                        </h4>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {/* Saved Bank Dropdown */}
+                            <div>
+                                <Label className="text-xs font-medium">Select Saved Bank Account</Label>
+                                <Select value={selectedBankId} onValueChange={handleBankSelect}>
+                                    <SelectTrigger className="mt-1 h-9 text-xs">
+                                        <SelectValue placeholder="Choose Bank Account" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="custom">+ Custom / Enter Directly</SelectItem>
+                                        {bankAccounts.map((b) => (
+                                            <SelectItem key={b.id} value={String(b.id)}>
+                                                {b.bank_name} {b.account_holder_name ? `· ${b.account_holder_name}` : ''}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {/* Bank Name Input */}
+                            <div>
+                                <Label className="text-xs font-medium">Bank Name</Label>
+                                <Input
+                                    value={bankName}
+                                    onChange={(e) => {
+                                        setBankName(e.target.value);
+                                        setSelectedBankId('custom');
+                                    }}
+                                    placeholder="e.g. HDFC Bank"
+                                    className="mt-1 h-9 text-xs"
+                                />
+                            </div>
+
+                            {/* Saved UPI Dropdown */}
+                            <div>
+                                <Label className="text-xs font-medium">Select Saved UPI ID</Label>
+                                <Select value={selectedUpiId} onValueChange={handleUpiSelect}>
+                                    <SelectTrigger className="mt-1 h-9 text-xs">
+                                        <SelectValue placeholder="Choose UPI ID" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="custom">+ Custom / Enter Directly</SelectItem>
+                                        {userUpis.map((u) => (
+                                            <SelectItem key={u.id} value={String(u.id)}>
+                                                {u.upi_id} {u.upi_app ? `(${u.upi_app})` : ''}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {/* UPI ID Input & App */}
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="col-span-2">
+                                    <Label className="text-xs font-medium">UPI ID</Label>
+                                    <Input
+                                        value={upiId}
+                                        onChange={(e) => {
+                                            setUpiId(e.target.value);
+                                            setSelectedUpiId('custom');
+                                        }}
+                                        placeholder="e.g. user@okaxis"
+                                        className="mt-1 h-9 text-xs font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <Label className="text-xs font-medium">App</Label>
+                                    <Select value={upiApp} onValueChange={setUpiApp}>
+                                        <SelectTrigger className="mt-1 h-9 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="Auto">Auto</SelectItem>
+                                            <SelectItem value="GPay">GPay</SelectItem>
+                                            <SelectItem value="PhonePe">PhonePe</SelectItem>
+                                            <SelectItem value="Paytm">Paytm</SelectItem>
+                                            <SelectItem value="BHIM">BHIM</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* SECTION 4: LOTS & FUNDING CONFIGURATION */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                             <Label className="text-xs font-medium">Lots / Applications</Label>
@@ -443,26 +602,6 @@ export default function EditApplicationModal({
                             </Select>
                         </div>
 
-                        <div>
-                            <Label className="text-xs font-medium">Bank Name</Label>
-                            <Input
-                                value={bankName}
-                                onChange={(e) => setBankName(e.target.value)}
-                                placeholder="e.g. HDFC Bank"
-                                className="mt-1 h-9 text-xs"
-                            />
-                        </div>
-
-                        <div>
-                            <Label className="text-xs font-medium">UPI ID</Label>
-                            <Input
-                                value={upiId}
-                                onChange={(e) => setUpiId(e.target.value)}
-                                placeholder="e.g. username@okhdfcbank"
-                                className="mt-1 h-9 text-xs font-mono"
-                            />
-                        </div>
-
                         <div className="sm:col-span-2">
                             <Label className="text-xs font-medium">Notes / Reference</Label>
                             <Input
@@ -474,38 +613,38 @@ export default function EditApplicationModal({
                         </div>
                     </div>
 
-                    {/* LIVE CALCULATION PREVIEW */}
-                    <div className="p-3.5 rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900 shadow-2xs space-y-2">
+                    {/* LIVE CALCULATION PREVIEW (RESPONSIVE) */}
+                    <div className="p-3 sm:p-4 rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900 shadow-2xs space-y-2">
                         <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 block">
                             Recalculated Financials Preview
                         </span>
-                        <div className="grid grid-cols-3 gap-2 text-center">
-                            <div className="p-2 rounded-lg bg-neutral-50 dark:bg-neutral-800/70">
-                                <span className="text-[10px] text-neutral-400 block">Total Capital</span>
-                                <span className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center">
+                            <div className="p-2 sm:p-2.5 rounded-lg bg-neutral-50 dark:bg-neutral-800/70 flex sm:flex-col justify-between items-center sm:items-stretch">
+                                <span className="text-[11px] text-neutral-400 block">Total Capital</span>
+                                <span className="text-sm sm:text-base font-bold text-neutral-900 dark:text-neutral-100 font-mono">
                                     {formatInr(totalCapital)}
                                 </span>
                             </div>
-                            <div className="p-2 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/30">
-                                <span className="text-[10px] text-emerald-600 block">Applicant Payout</span>
-                                <span className="text-sm font-bold text-emerald-600">
+                            <div className="p-2 sm:p-2.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/30 flex sm:flex-col justify-between items-center sm:items-stretch">
+                                <span className="text-[11px] text-emerald-600 block">Applicant Payout</span>
+                                <span className="text-sm sm:text-base font-bold text-emerald-600 font-mono">
                                     {formatInr(previewUserPayout)}
                                 </span>
                             </div>
-                            <div className="p-2 rounded-lg bg-purple-50/70 dark:bg-purple-950/30">
-                                <span className="text-[10px] text-purple-600 block">Admin Margin</span>
-                                <span className="text-sm font-bold text-purple-600">
+                            <div className="p-2 sm:p-2.5 rounded-lg bg-purple-50/70 dark:bg-purple-950/30 flex sm:flex-col justify-between items-center sm:items-stretch">
+                                <span className="text-[11px] text-purple-600 block">Admin Margin</span>
+                                <span className="text-sm sm:text-base font-bold text-purple-600 font-mono">
                                     {formatInr(previewNetEarnings)}
                                 </span>
                             </div>
                         </div>
                     </div>
 
-                    <DialogFooter className="gap-2 sm:gap-0">
-                        <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
+                    <DialogFooter className="flex-col-reverse sm:flex-row gap-2 sm:gap-0 pt-2">
+                        <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isSubmitting} className="w-full sm:w-auto">
                             Cancel
                         </Button>
-                        <Button type="submit" size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" disabled={isSubmitting}>
+                        <Button type="submit" size="sm" className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" disabled={isSubmitting}>
                             {isSubmitting ? 'Saving Changes...' : 'Save & Update Application'}
                         </Button>
                     </DialogFooter>

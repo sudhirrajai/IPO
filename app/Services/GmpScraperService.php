@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AppSetting;
+use App\Models\ApplicationBatch;
 use App\Models\AuditLog;
 use App\Models\Ipo;
 use App\Models\SyncLog;
@@ -252,6 +253,7 @@ class GmpScraperService
                     if ((float) $ipo->gmp !== $newGmp) {
                         $ipo->gmp = $newGmp;
                         $hasChanged = true;
+                        self::recalculatePercentageBatchesForIpo($ipo, $newGmp);
                     }
                 }
 
@@ -335,7 +337,31 @@ class GmpScraperService
                 continue;
             }
 
+            $cleanItemName = $this->normalizeName($item['name']);
             $symbol = strtoupper(substr(preg_replace('/[^a-zA-Z0-9]/', '', $item['name']), 0, 10));
+
+            // Prevent duplicate creation if company name or symbol is already present
+            $alreadyExists = Ipo::whereRaw('LOWER(company_name) = ?', [strtolower(trim($item['name']))])
+                ->orWhere('symbol', $symbol)
+                ->first();
+
+            if (! $alreadyExists) {
+                foreach (Ipo::all() as $existingIpo) {
+                    if ($this->normalizeName($existingIpo->company_name) === $cleanItemName) {
+                        $alreadyExists = $existingIpo;
+                        break;
+                    }
+                }
+            }
+
+            if ($alreadyExists) {
+                if ($item['gmp'] !== null && (float) $alreadyExists->gmp !== (float) $item['gmp']) {
+                    $alreadyExists->gmp = (float) $item['gmp'];
+                    $alreadyExists->save();
+                    self::recalculatePercentageBatchesForIpo($alreadyExists, (float) $item['gmp']);
+                }
+                continue;
+            }
 
             $numericIssueSize = null;
             if (! empty($item['issue_size'])) {
@@ -443,6 +469,27 @@ class GmpScraperService
         $cleanDbName = $this->normalizeName($ipo->company_name);
         $cleanSymbol = $this->normalizeName($ipo->symbol ?? '');
 
+        // Pass 0: Known market aliases
+        $knownAliases = [
+            'reliance jio' => ['jioplatforms', 'jio', 'reliancejio'],
+            'jio' => ['jioplatforms', 'reliancejio'],
+            'jioplatforms' => ['reliancejio', 'jio'],
+            'acevector' => ['snapdeal', 'acevectorsnapdeal'],
+            'snapdeal' => ['acevector', 'acevectorsnapdeal'],
+            'boat' => ['boatlifestyle', 'imaginemarketing'],
+        ];
+
+        foreach ($knownAliases as $root => $variants) {
+            $isDbMatched = str_contains($cleanDbName, $root) || in_array($cleanDbName, $variants);
+            if ($isDbMatched) {
+                foreach ($scrapedItems as $item) {
+                    if (str_contains($item['clean_name'], $root) || in_array($item['clean_name'], $variants)) {
+                        return $item;
+                    }
+                }
+            }
+        }
+
         // Pass 1: Exact match on normalized company name
         foreach ($scrapedItems as $item) {
             if ($item['clean_name'] === $cleanDbName) {
@@ -473,6 +520,36 @@ class GmpScraperService
         }
 
         return $bestMatch;
+    }
+
+    /**
+     * Recalculate all open percentage profit-sharing application batches for an IPO when GMP changes.
+     */
+    public static function recalculatePercentageBatchesForIpo(Ipo $ipo, float $newGmp): int
+    {
+        $batches = ApplicationBatch::where('ipo_id', $ipo->id)
+            ->where('profit_sharing_type', 'percentage')
+            ->where('settlement_status', '!=', 'settled')
+            ->get();
+
+        $updatedCount = 0;
+        foreach ($batches as $batch) {
+            $lotSize = (int) ($ipo->lot_size ?? 1);
+            $count = (int) ($batch->application_count ?? 1);
+            $expectedListingGain = round($lotSize * $newGmp * $count, 2);
+            $userPayout = round(((float) $batch->profit_sharing_value / 100) * $expectedListingGain, 2);
+            $netEarnings = round($expectedListingGain - $userPayout, 2);
+
+            $batch->update([
+                'gmp_snapshot' => $newGmp,
+                'expected_gross_profit' => $expectedListingGain,
+                'expected_user_payout' => $userPayout,
+                'expected_net_earnings' => $netEarnings,
+            ]);
+            $updatedCount++;
+        }
+
+        return $updatedCount;
     }
 
     /**

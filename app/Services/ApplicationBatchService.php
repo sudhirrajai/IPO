@@ -320,7 +320,7 @@ class ApplicationBatchService
             : ($batch->capital_amount && $batch->application_count ? (float) ($batch->capital_amount / $batch->application_count) : (float) ($lotSize * $issuePrice));
 
         $totalCapital = round($capitalPerApp * $count, 2);
-        $gmpSnapshot = (float) ($batch->gmp_snapshot ?: ($ipo->gmp ?? 0));
+        $gmpSnapshot = (float) (($ipo->gmp !== null && (float) $ipo->gmp > 0) ? $ipo->gmp : ($batch->gmp_snapshot ?? 0));
         $expectedListingGain = round($lotSize * $gmpSnapshot * $count, 2);
 
         $traderRate = 0.0;
@@ -380,11 +380,41 @@ class ApplicationBatchService
             $userPanId = $createdPan->id;
         }
 
+        // Auto-save bank account if provided
+        $savedBank = null;
+        if (! empty($data['bank_name'])) {
+            $savedBank = \App\Models\BankAccount::firstOrCreate([
+                'user_id' => $batch->user_id,
+                'bank_name' => trim($data['bank_name']),
+            ], [
+                'account_holder_name' => $data['applicant_name'] ?? $batch->applicant_name,
+                'status' => 'active',
+            ]);
+        }
+
+        // Auto-save / link UPI ID if provided
+        if (! empty($data['upi_id'])) {
+            $cleanUpi = strtolower(trim($data['upi_id']));
+            $upiApp = ! empty($data['upi_app']) && $data['upi_app'] !== 'Auto'
+                ? $data['upi_app']
+                : \App\Models\UserUpi::detectApp($cleanUpi);
+
+            \App\Models\UserUpi::updateOrCreate([
+                'user_id' => $batch->user_id,
+                'upi_id' => $cleanUpi,
+            ], [
+                'bank_account_id' => $savedBank?->id,
+                'upi_app' => $upiApp,
+                'status' => 'active',
+            ]);
+        }
+
         $updateFields = [
             'application_count' => $count,
             'funding_source' => $fundingSource,
             'profit_sharing_type' => $profitSharingType,
             'profit_sharing_value' => $profitSharingValue,
+            'gmp_snapshot' => $gmpSnapshot,
             'capital_amount' => $capitalAmount,
             'expected_gross_profit' => $grossProfit,
             'expected_user_payout' => $userPayout,

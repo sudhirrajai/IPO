@@ -62,6 +62,12 @@ class IpoSyncService
                     if (! $existing && $symbol) {
                         $existing = Ipo::where('symbol', $symbol)->first();
                     }
+                    if (! $existing && ! empty($data['company_name'])) {
+                        $cleanName = strtolower(trim(preg_replace('/\s+IPO\s*$/i', '', $data['company_name'])));
+                        $existing = Ipo::whereRaw('LOWER(company_name) = ?', [strtolower(trim($data['company_name']))])
+                            ->orWhereRaw('LOWER(REPLACE(company_name, " IPO", "")) = ?', [$cleanName])
+                            ->first();
+                    }
 
                     $fieldsToUpdate = [
                         'company_name' => $data['company_name'],

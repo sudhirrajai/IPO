@@ -289,3 +289,105 @@ test('checking allotment updates database applicant_name and pan account_holder_
     expect($userPan->account_holder_name)->toBe('SUDHIR RAJAI OFFICIAL');
 });
 
+test('profit sharing in percentage dynamically recalculates user payout when GMP changes', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $user = User::factory()->create(['role' => 'user']);
+
+    $ipo = Ipo::create([
+        'company_name' => 'Dynamic GMP IPO',
+        'symbol' => 'DYNGMP',
+        'exchange' => 'NSE',
+        'lot_size' => 1,
+        'issue_price' => 500,
+        'gmp' => 4000.0,
+        'status' => 'open',
+    ]);
+
+    // Create application with 30% profit sharing on GMP = 4000
+    // Expected listing gain = 1 * 4000 = 4000
+    // 30% of 4000 = 1200
+    $batch = \App\Services\ApplicationBatchService::createBatch([
+        'ipo_id' => $ipo->id,
+        'user_id' => $user->id,
+        'application_count' => 1,
+        'profit_sharing_type' => 'percentage',
+        'profit_sharing_value' => 30,
+        'funding_source' => 'my_money',
+    ]);
+
+    expect((float) $batch->expected_user_payout)->toBe(1200.0)
+        ->and((float) $batch->expected_gross_profit)->toBe(4000.0)
+        ->and((float) $batch->expected_net_earnings)->toBe(2800.0);
+
+    // Now market GMP shifts from 4000 to 3500!
+    // Admin or scraper updates GMP
+    $this->actingAs($admin)->post("/ipos/{$ipo->id}/gmp", [
+        'gmp' => 3500.0,
+    ])->assertSessionHas('success');
+
+    $batch->refresh();
+    $batch->load('ipo');
+
+    // Expected listing gain becomes 3500, 30% of 3500 = 1050!
+    expect((float) $batch->expected_user_payout)->toBe(1050.0)
+        ->and((float) $batch->expected_gross_profit)->toBe(3500.0)
+        ->and((float) $batch->expected_net_earnings)->toBe(2450.0);
+});
+
+test('admin can update application bank account and UPI from saved selections', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $user = User::factory()->create(['role' => 'user']);
+
+    $ipo = Ipo::create([
+        'company_name' => 'Bank Test IPO',
+        'symbol' => 'BANKTEST',
+        'exchange' => 'NSE',
+        'lot_size' => 10,
+        'issue_price' => 100,
+        'gmp' => 50,
+        'status' => 'open',
+    ]);
+
+    $bank = \App\Models\BankAccount::create([
+        'user_id' => $user->id,
+        'bank_name' => 'HDFC Bank',
+        'account_holder_name' => 'John Doe',
+        'status' => 'active',
+    ]);
+
+    $upi = \App\Models\UserUpi::create([
+        'user_id' => $user->id,
+        'upi_id' => 'john@okhdfcbank',
+        'upi_app' => 'GPay',
+        'status' => 'active',
+    ]);
+
+    $batch = \App\Services\ApplicationBatchService::createBatch([
+        'ipo_id' => $ipo->id,
+        'user_id' => $user->id,
+        'application_count' => 1,
+        'profit_sharing_type' => 'fix',
+        'profit_sharing_value' => 500,
+        'funding_source' => 'my_money',
+    ]);
+
+    $response = $this->actingAs($admin)->put("/applications/{$batch->id}", [
+        'bank_name' => 'HDFC Bank',
+        'upi_id' => 'john@okhdfcbank',
+        'upi_app' => 'GPay',
+        'profit_sharing_type' => 'percentage',
+        'profit_sharing_value' => 30,
+        'application_count' => 1,
+        'funding_source' => 'my_money',
+    ]);
+
+    $response->assertSessionHasNoErrors();
+
+    $batch->refresh();
+    expect($batch->bank_name)->toBe('HDFC Bank')
+        ->and($batch->upi_id)->toBe('john@okhdfcbank')
+        ->and($batch->upi_app)->toBe('GPay')
+        ->and($batch->profit_sharing_type)->toBe('percentage')
+        ->and((float) $batch->profit_sharing_value)->toBe(30.0);
+});
+

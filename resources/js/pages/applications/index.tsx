@@ -47,8 +47,7 @@ import {
 } from '@/components/ui/select';
 import Pagination from '@/components/pagination';
 import AppLayout from '@/layouts/app-layout';
-import { formatIstDate, formatIstDateTime, getIstToday } from '@/lib/utils';
-import type { ApplicationBatch, BreadcrumbItem, Ipo, User, UserPan } from '@/types';
+import type { ApplicationBatch, BankAccount, BreadcrumbItem, Ipo, User, UserPan, UserUpi } from '@/types';
 
 interface ApplicationsIndexProps {
     batches: {
@@ -64,6 +63,8 @@ interface ApplicationsIndexProps {
     ipos: Ipo[];
     users: User[];
     userPans?: UserPan[];
+    bankAccounts?: BankAccount[];
+    userUpis?: UserUpi[];
     allotmentTodayCount?: number;
     filters: {
         ipo_id?: string;
@@ -89,6 +90,8 @@ export default function ApplicationsIndex({
     ipos,
     users,
     userPans = [],
+    bankAccounts = [],
+    userUpis = [],
     allotmentTodayCount = 0,
     filters,
     isAdmin,
@@ -1330,6 +1333,9 @@ export default function ApplicationsIndex({
                     batch={editingBatch}
                     ipo={editingBatch.ipo || ipos.find((i) => i.id === editingBatch.ipo_id)}
                     userPans={userPans}
+                    bankAccounts={bankAccounts}
+                    userUpis={userUpis}
+                    isAdmin={isAdmin}
                     isOpen={!!editingBatch}
                     onClose={() => setEditingBatch(null)}
                 />

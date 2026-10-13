@@ -177,18 +177,14 @@ class IpoController extends Controller
                 ->get();
 
         // Saved Bank Accounts for quick selection with linked UPI IDs
-        $bankAccounts = \App\Models\BankAccount::with('upis')
-            ->where('user_id', $user->id)
-            ->where('status', 'active')
-            ->orderBy('bank_name')
-            ->get();
+        $bankAccounts = $isAdmin
+            ? \App\Models\BankAccount::where('status', 'active')->orderBy('bank_name')->get()
+            : \App\Models\BankAccount::where('user_id', $user->id)->where('status', 'active')->orderBy('bank_name')->get();
 
-        // All saved UPI IDs for this user
-        $userUpis = \App\Models\UserUpi::with('bankAccount')
-            ->where('user_id', $user->id)
-            ->where('status', 'active')
-            ->orderBy('upi_id')
-            ->get();
+        // All saved UPI IDs
+        $userUpis = $isAdmin
+            ? \App\Models\UserUpi::where('status', 'active')->orderBy('upi_id')->get()
+            : \App\Models\UserUpi::where('user_id', $user->id)->where('status', 'active')->orderBy('upi_id')->get();
 
         $isFavorite = $user ? $user->favoriteIpos()->where('ipo_id', $ipo->id)->exists() : false;
 
@@ -263,6 +259,10 @@ class IpoController extends Controller
         $oldValues = $ipo->toArray();
         $ipo->update($validated);
 
+        if (isset($validated['gmp']) && $validated['gmp'] !== null) {
+            \App\Services\GmpScraperService::recalculatePercentageBatchesForIpo($ipo, (float) $validated['gmp']);
+        }
+
         AuditService::log('ipo_updated', $ipo, $oldValues, $validated, "Updated IPO {$ipo->company_name}");
 
         return back()->with('success', 'IPO updated successfully.');
@@ -282,6 +282,10 @@ class IpoController extends Controller
         $ipo->update([
             'gmp' => $newGmp,
         ]);
+
+        if ($newGmp !== null) {
+            \App\Services\GmpScraperService::recalculatePercentageBatchesForIpo($ipo, $newGmp);
+        }
 
         AuditService::log('ipo_gmp_updated', $ipo, ['gmp' => $oldGmp], ['gmp' => $newGmp], "Updated GMP for {$ipo->company_name} to " . ($newGmp !== null ? "₹{$newGmp}" : 'N/A'));
 
