@@ -115,12 +115,27 @@ class NseAllotmentService
                 ];
             }
 
-            // Run headless node script
-            $result = Process::path(base_path())
-                ->timeout(45)
-                ->run(['node', 'scripts/nse_scraper.mjs', $symbol, $pan]);
+            // Run headless node script with fallbacks for restricted PHP environments
+            $output = self::executeScraper($symbol, $pan);
 
-            $output = $result->output();
+            if ($output === null) {
+                return [
+                    'success' => false,
+                    'status' => 'exec_disabled',
+                    'found' => false,
+                    'message' => 'Command execution (proc_open/exec) is disabled in your PHP configuration. Enable proc_open in php.ini disable_functions, or use BSE India / KFintech for instant check.',
+                    'allotted' => false,
+                    'all_shares' => 0,
+                    'app_shares' => 0,
+                    'application_number' => null,
+                    'order_number' => null,
+                    'upi_amount' => null,
+                    'upi_status' => null,
+                    'allotment_price' => null,
+                    'symbol' => $symbol,
+                    'pan' => $pan,
+                ];
+            }
 
             if (preg_match('/RESULT_START\s*([\s\S]*?)\s*RESULT_END/', $output, $matches)) {
                 $rawJson = trim($matches[1]);
@@ -340,4 +355,57 @@ class NseAllotmentService
         $result['ipo_name'] = $ipo->company_name;
         return $result;
     }
+
+    /**
+     * Execute scraper process using available PHP command execution mechanisms.
+     */
+    private static function executeScraper(string $symbol, string $pan): ?string
+    {
+        $base = base_path();
+        $script = base_path('scripts/nse_scraper.mjs');
+        $symbolArg = escapeshellarg($symbol);
+        $panArg = escapeshellarg($pan);
+
+        $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+
+        // 1. Try Laravel Process (requires proc_open)
+        if (function_exists('proc_open') && ! in_array('proc_open', $disabled, true)) {
+            try {
+                $res = Process::path($base)->timeout(45)->run(['node', 'scripts/nse_scraper.mjs', $symbol, $pan]);
+                return $res->output();
+            } catch (\Throwable $e) {
+                Log::warning('proc_open runner failed, attempting exec fallback: ' . $e->getMessage());
+            }
+        }
+
+        // 2. Try exec()
+        if (function_exists('exec') && ! in_array('exec', $disabled, true)) {
+            try {
+                $cmd = "node " . escapeshellarg($script) . " {$symbolArg} {$panArg} 2>&1";
+                $lines = [];
+                @exec($cmd, $lines);
+                if (! empty($lines)) {
+                    return implode("\n", $lines);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('exec runner failed: ' . $e->getMessage());
+            }
+        }
+
+        // 3. Try shell_exec()
+        if (function_exists('shell_exec') && ! in_array('shell_exec', $disabled, true)) {
+            try {
+                $cmd = "node " . escapeshellarg($script) . " {$symbolArg} {$panArg} 2>&1";
+                $out = @shell_exec($cmd);
+                if ($out !== null && $out !== false) {
+                    return (string) $out;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('shell_exec runner failed: ' . $e->getMessage());
+            }
+        }
+
+        return null;
+    }
 }
+
