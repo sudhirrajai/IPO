@@ -41,6 +41,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 'message' => 'This application record was not found or has been deleted.',
             ], 404);
         });
+    Route::get('/applications/{batch}/allotment-status', [ApplicationBatchController::class, 'allotmentStatus'])
+        ->name('applications.allotment-status');
+    Route::post('/applications/bulk-check-allotments', [ApplicationBatchController::class, 'bulkCheckAllotments'])
+        ->name('applications.bulk-check-allotments');
     Route::post('/applications/{batch}/pan', [ApplicationBatchController::class, 'updatePan'])->name('applications.pan');
     Route::post('/applications/{batch}/approve', [ApplicationBatchController::class, 'approve'])->name('applications.approve');
     Route::post('/applications/{batch}/reject', [ApplicationBatchController::class, 'reject'])->name('applications.reject');

@@ -472,4 +472,88 @@ class ApplicationBatchService
 
         return $batch->fresh(['user', 'rate', 'batchPans.userPan', 'settlement']);
     }
+
+    /**
+     * Mark an application batch as actively checking in the background.
+     */
+    public static function markChecking(ApplicationBatch $batch): void
+    {
+        $existing = is_array($batch->allotment_details) ? $batch->allotment_details : [];
+        $existing['checking'] = true;
+        $existing['status'] = 'checking';
+        $existing['queued_at'] = now()->toIso8601String();
+        $batch->updateQuietly(['allotment_details' => $existing]);
+    }
+
+    /**
+     * Execute multi-provider or specific provider allotment check on a batch.
+     */
+    public static function executeCheckAllotment(ApplicationBatch $batch, string $provider = 'auto'): array
+    {
+        $provider = strtolower(trim($provider));
+
+        $result = match ($provider) {
+            'nse' => \App\Services\NseAllotmentService::checkBatchAllotment($batch),
+            'bse' => \App\Services\BseAllotmentService::checkBatchAllotment($batch),
+            'kfintech' => \App\Services\KfintechAllotmentService::checkBatchAllotment($batch),
+            default => self::performAutoCheckAllotment($batch),
+        };
+
+        // Ensure checking flag is cleared on fresh model
+        $fresh = $batch->fresh();
+        if ($fresh && is_array($fresh->allotment_details) && ($fresh->allotment_details['checking'] ?? false)) {
+            $details = $fresh->allotment_details;
+            $details['checking'] = false;
+            $fresh->updateQuietly(['allotment_details' => $details]);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Cascading multi-provider allotment checker.
+     * Tries KFintech (if matched/configured) -> BSE (fast ~300ms) -> NSE (headless browser).
+     */
+    public static function performAutoCheckAllotment(ApplicationBatch $batch): array
+    {
+        $ipo = $batch->ipo;
+        $registrar = strtolower((string) ($ipo?->registrar ?? ''));
+
+        // 1. If IPO registrar is KFintech, check KFintech first
+        if (str_contains($registrar, 'kfin') || ! empty($ipo?->kfin_client_id)) {
+            $kfinResult = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
+            if ($kfinResult['success'] && ($kfinResult['found'] ?? false)) {
+                return $kfinResult;
+            }
+        }
+
+        // 2. Check BSE India (Instant REST API)
+        $bseResult = \App\Services\BseAllotmentService::checkBatchAllotment($batch);
+        if ($bseResult['success'] && ($bseResult['found'] ?? false)) {
+            return $bseResult;
+        }
+
+        // 3. Check NSE India (Headless scraper with captcha bypass)
+        $nseResult = \App\Services\NseAllotmentService::checkBatchAllotment($batch);
+        if ($nseResult['success'] && ($nseResult['found'] ?? false)) {
+            return $nseResult;
+        }
+
+        // If none found a record, prioritize the most descriptive result
+        if (! empty($nseResult['message']) && ($nseResult['success'] ?? false)) {
+            return $nseResult;
+        }
+
+        if (! empty($bseResult['message']) && ($bseResult['success'] ?? false)) {
+            return $bseResult;
+        }
+
+        return [
+            'success' => true,
+            'status' => 'not_found_anywhere',
+            'found' => false,
+            'message' => 'No allotment records found on BSE, NSE, or registrar portals for this application.',
+            'provider' => 'auto',
+        ];
+    }
 }

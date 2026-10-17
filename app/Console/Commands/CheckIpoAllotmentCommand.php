@@ -15,35 +15,47 @@ class CheckIpoAllotmentCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'ipo:check-allotment {--ipo_id= : Check allotment for specific IPO ID} {--force : Force check even if allotment date is in the future}';
+    protected $signature = 'ipo:check-allotment {--ipo_id= : Check allotment for specific IPO ID} {--batch_id= : Check allotment for a specific batch ID} {--provider=auto : Provider to use (auto, nse, bse, kfintech)} {--force : Force check even if allotment date is in the future}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Check and scrape IPO allotment status for applicants from KFintech';
+    protected $description = 'Check and scrape IPO allotment status for applicants across exchanges and registrars';
 
     /**
      * Execute the console command.
      */
     public function handle(): int
     {
-        $this->info('Starting KFintech IPO allotment check...');
+        $this->info('Starting multi-provider IPO allotment check...');
+
+        if ($batchId = $this->option('batch_id')) {
+            $batch = ApplicationBatch::find($batchId);
+            if (! $batch) {
+                $this->error("Batch #{$batchId} not found.");
+                return self::FAILURE;
+            }
+
+            $provider = (string) $this->option('provider');
+            $this->info("Checking single batch {$batch->batch_number} (Provider: {$provider})...");
+            $res = \App\Services\ApplicationBatchService::executeCheckAllotment($batch, $provider);
+            $this->line(json_encode($res, JSON_PRETTY_PRINT));
+            return self::SUCCESS;
+        }
 
         $query = Ipo::query();
 
         if ($this->option('ipo_id')) {
             $query->where('id', $this->option('ipo_id'));
         } elseif (! $this->option('force')) {
-            // Check IPOs whose allotment date has arrived or passed (or today)
             $today = Carbon::today()->toDateString();
             $query->where(function ($q) use ($today) {
                 $q->whereNotNull('allotment_date')
                     ->where('allotment_date', '<=', $today)
                     ->whereNotIn('status', ['cancelled']);
             })->orWhere(function ($q) {
-                // Or IPOs that have pending applications without allotment result
                 $q->whereHas('applicationBatches', function ($b) {
                     $b->whereIn('application_status', ['submitted', 'confirmed', 'pending_allotment', 'ready']);
                 });
@@ -60,19 +72,11 @@ class CheckIpoAllotmentCommand extends Command
         $totalChecked = 0;
         $totalAllotted = 0;
         $totalNotAllotted = 0;
+        $provider = (string) $this->option('provider');
 
         foreach ($ipos as $ipo) {
             $this->line("Processing IPO: {$ipo->company_name} (ID: {$ipo->id})");
 
-            $kfinMatch = KfintechAllotmentService::findMatchingKfinIpo($ipo);
-            if (! $kfinMatch) {
-                $this->warn("  -> Not found in KFintech active registry. Skipping.");
-                continue;
-            }
-
-            $this->info("  -> Matched with KFintech: {$kfinMatch['name']} (Client ID: {$kfinMatch['clientId']})");
-
-            // Find pending batches for this IPO
             $batches = ApplicationBatch::where('ipo_id', $ipo->id)
                 ->whereIn('application_status', ['ready', 'submitted', 'confirmed', 'pending_allotment'])
                 ->get();
@@ -94,22 +98,21 @@ class CheckIpoAllotmentCommand extends Command
                 }
 
                 $this->line("  -> Checking Batch {$batch->batch_number} for PAN: {$pan}...");
-                $res = KfintechAllotmentService::checkBatchAllotment($batch);
+                $res = \App\Services\ApplicationBatchService::executeCheckAllotment($batch, $provider);
 
-                if ($res['success'] && $res['found']) {
+                if ($res['success'] && ($res['found'] ?? false)) {
                     $totalChecked++;
-                    if ($res['allotted']) {
+                    if ($res['allotted'] ?? false) {
                         $totalAllotted++;
-                        $this->info("     ✓ ALLOTTED! ({$res['all_shares']} / {$res['app_shares']} shares) Name: {$res['name_from_pan']}");
+                        $this->info("     ✓ ALLOTTED! ({$res['all_shares']} / {$res['app_shares']} shares) Source: " . ($res['provider'] ?? 'Exchange'));
                     } else {
                         $totalNotAllotted++;
-                        $this->comment("     ✗ Not Allotted. Name: {$res['name_from_pan']}");
+                        $this->comment("     ✗ Not Allotted. Source: " . ($res['provider'] ?? 'Exchange'));
                     }
                 } else {
                     $this->line("     - Result: " . ($res['message'] ?? 'No record found'));
                 }
 
-                // Respectful rate limiting between requests
                 usleep(500000); // 0.5s
             }
         }

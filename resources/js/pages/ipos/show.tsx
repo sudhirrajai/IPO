@@ -24,6 +24,7 @@ import {
     History,
     Landmark,
     Layers,
+    Loader2,
     Lock,
     Percent,
     PieChart,
@@ -44,6 +45,7 @@ import {
     Users,
     Wallet,
     X,
+    Zap,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import EditApplicationModal from '@/components/edit-application-modal';
@@ -352,6 +354,19 @@ export default function IpoShow({
     const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
     const [isCheckingAllAllotments, setIsCheckingAllAllotments] = useState(false);
     const [checkedBatchIds, setCheckedBatchIds] = useState<Record<number, { allotted: boolean; details: any }>>({});
+    const [checkingBatchIds, setCheckingBatchIds] = useState<Record<number, boolean>>({});
+
+    // Live background polling when any batch in this IPO is checking in background
+    useEffect(() => {
+        const hasCheckingBatches = batches.some((b) => b.allotment_details?.checking) || Object.keys(checkingBatchIds).length > 0;
+        if (!hasCheckingBatches) return;
+
+        const interval = setInterval(() => {
+            router.reload({ only: ['batches'], preserveScroll: true });
+        }, 3500);
+
+        return () => clearInterval(interval);
+    }, [batches, checkingBatchIds]);
 
     // PAN copy indicator
     const [copiedPan, setCopiedPan] = useState<string | null>(null);
@@ -428,9 +443,19 @@ export default function IpoShow({
 
     const handleCheckAllotment = async (batch: ApplicationBatch, provider: string = 'auto') => {
         setAllotmentBatch(batch);
-        setAllotmentLoading(true);
+        setAllotmentLoading(false);
+        setCheckingBatchIds((prev) => ({ ...prev, [batch.id]: true }));
+        setAllotmentResult({
+            success: true,
+            queued: true,
+            status: 'checking',
+            message: `Allotment check has been queued for ${batch.batch_number}. Processing in background...`,
+            batch_id: batch.id,
+            provider,
+            pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
+            pan_masked: batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined,
+        });
         setAllotmentModalOpen(true);
-        setAllotmentResult(null);
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
@@ -449,6 +474,11 @@ export default function IpoShow({
                     success: false,
                     message: `Application #${batch.batch_number || batch.id} was not found on the server. Please reload the page to refresh records.`,
                 });
+                setCheckingBatchIds((prev) => {
+                    const next = { ...prev };
+                    delete next[batch.id];
+                    return next;
+                });
                 return;
             }
 
@@ -466,25 +496,16 @@ export default function IpoShow({
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
                 pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
             });
-
-            if (data.success && data.found) {
-                setCheckedBatchIds(prev => ({
-                    ...prev,
-                    [batch.id]: {
-                        allotted: Boolean(data.allotted),
-                        details: data,
-                    },
-                }));
-            }
-
-            router.reload({ preserveScroll: true });
         } catch (err: any) {
             setAllotmentResult({
                 success: false,
-                message: err?.message || 'Failed to query KFintech allotment registry.',
+                message: err?.message || 'Failed to dispatch allotment check in background.',
             });
-        } finally {
-            setAllotmentLoading(false);
+            setCheckingBatchIds((prev) => {
+                const next = { ...prev };
+                delete next[batch.id];
+                return next;
+            });
         }
     };
 
@@ -1690,23 +1711,32 @@ export default function IpoShow({
                                                 </td>
                                                 <td className="py-3 px-3">
                                                     <div className="space-y-1">
-                                                        <Badge
-                                                            variant="outline"
-                                                            className={`text-[10px] uppercase font-semibold ${
-                                                                isAllotted
-                                                                    ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                                                    : isNotAllotted
-                                                                    ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                                                                    : isPendingApproval
-                                                                    ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                                                                    : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                                                            }`}
-                                                        >
-                                                            {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : (batch.application_status.replace('_', ' '))}
-                                                        </Badge>
+                                                        {batch.allotment_details?.checking || checkingBatchIds[batch.id] ? (
+                                                            <Badge
+                                                                variant="outline"
+                                                                className="text-[10px] uppercase font-bold border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 animate-pulse flex items-center gap-1"
+                                                            >
+                                                                <Loader2 className="h-2.5 w-2.5 animate-spin text-amber-600" /> Checking Allotment
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge
+                                                                variant="outline"
+                                                                className={`text-[10px] uppercase font-semibold ${
+                                                                    isAllotted
+                                                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                                                        : isNotAllotted
+                                                                        ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                                                                        : isPendingApproval
+                                                                        ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                                                                        : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                                                                }`}
+                                                            >
+                                                                {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : (batch.application_status.replace('_', ' '))}
+                                                            </Badge>
+                                                        )}
 
-                                                        {/* Allotment Details Info */}
-                                                        {batch.allotment_details && (
+                                                        {/* Allotment Details Info (when not checking) */}
+                                                        {batch.allotment_details && !batch.allotment_details?.checking && !checkingBatchIds[batch.id] && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -1764,8 +1794,28 @@ export default function IpoShow({
                                                             </>
                                                         )}
 
-                                                        {/* KFintech Allotment Check Button (Only visible when allotment date is present and reached) */}
-                                                        {showAllotmentButton && (
+                                                        {/* Check Allotment Button or Background Checking Badge */}
+                                                        {batch.allotment_details?.checking || checkingBatchIds[batch.id] ? (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={() => {
+                                                                    setAllotmentBatch(batch);
+                                                                    setAllotmentResult({
+                                                                        success: true,
+                                                                        queued: true,
+                                                                        status: 'checking',
+                                                                        message: `Checking allotment in background for #${batch.batch_number}...`,
+                                                                        batch_id: batch.id,
+                                                                    });
+                                                                    setAllotmentModalOpen(true);
+                                                                }}
+                                                                className="h-7 px-2 text-xs font-semibold border-amber-400 bg-amber-50/80 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700 animate-pulse shadow-2xs"
+                                                                title="Allotment check running in background across BSE, NSE, and Registrars. Click to view live progress."
+                                                            >
+                                                                <Loader2 className="h-3 w-3 mr-1 animate-spin text-amber-600" /> Checking...
+                                                            </Button>
+                                                        ) : showAllotmentButton ? (
                                                             <Button
                                                                 size="sm"
                                                                 variant={isBatchAllotmentToday ? 'default' : 'outline'}
@@ -1775,11 +1825,11 @@ export default function IpoShow({
                                                                         ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
                                                                         : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
                                                                 }`}
-                                                                title={isBatchAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : `Check KFintech allotment status (Allotment: ${formatIstDate(allotmentDateStr)})`}
+                                                                title={isBatchAllotmentToday ? 'Today is Allotment Day! Live query in background' : `Check allotment in background (Allotment: ${formatIstDate(allotmentDateStr)})`}
                                                             >
                                                                 <Search className={`h-3 w-3 mr-1 ${isBatchAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
                                                             </Button>
-                                                        )}
+                                                        ) : null}
 
                                                         {isPending && (
                                                             <>
@@ -1895,6 +1945,27 @@ export default function IpoShow({
                                     <CardDescription>Applications filled with dynamic profit sharing, bank accounts, and 1-click allotment actions</CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap">
+                                    {/* Bulk Allotment Check Button (Background Worker) */}
+                                    {isAdmin && (
+                                        <Button
+                                            size="sm"
+                                            onClick={handleCheckAllAllotments}
+                                            disabled={isCheckingAllAllotments}
+                                            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold h-8 shadow-xs"
+                                            title="Check allotment for all unallotted applications of this IPO in background"
+                                        >
+                                            {isCheckingAllAllotments ? (
+                                                <>
+                                                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Dispatching...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Zap className="mr-1.5 h-3.5 w-3.5 text-amber-300" /> Bulk Check Allotments
+                                                </>
+                                            )}
+                                        </Button>
+                                    )}
+
                                     {/* CSV Export Option 1: User Rates CSV */}
                                     <a
                                         href={`/ipos/${ipo.id}/export/user-csv`}
@@ -3859,6 +3930,7 @@ export default function IpoShow({
                 onClose={() => setAllotmentModalOpen(false)}
                 isLoading={allotmentLoading}
                 result={allotmentResult}
+                batchId={allotmentBatch?.id}
                 companyName={ipo.company_name}
                 symbol={ipo.symbol}
                 batchNumber={allotmentBatch?.batch_number}
@@ -3867,6 +3939,16 @@ export default function IpoShow({
                 applicantName={allotmentBatch?.applicant_name || allotmentBatch?.user_pan?.account_holder_name}
                 currentStatus={allotmentBatch?.application_status}
                 onRecheck={(provider) => allotmentBatch && handleCheckAllotment(allotmentBatch, provider || 'auto')}
+                onStatusUpdate={(updatedData) => {
+                    if (allotmentBatch) {
+                        setCheckingBatchIds((prev) => {
+                            const next = { ...prev };
+                            delete next[allotmentBatch.id];
+                            return next;
+                        });
+                        router.reload({ only: ['batches'], preserveScroll: true });
+                    }
+                }}
                 onMarkStatus={(status) => {
                     if (allotmentBatch) {
                         handleStatusChange(allotmentBatch.id, status);

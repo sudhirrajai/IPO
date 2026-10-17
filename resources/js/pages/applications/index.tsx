@@ -13,6 +13,7 @@ import {
     FileText,
     Filter,
     Landmark,
+    Loader2,
     Plus,
     Search,
     ShieldAlert,
@@ -21,6 +22,7 @@ import {
     Trash2,
     TrendingUp,
     X,
+    Zap,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import EditApplicationModal from '@/components/edit-application-modal';
@@ -147,6 +149,25 @@ export default function ApplicationsIndex({
     const [allotmentResult, setAllotmentResult] = useState<AllotmentResultData | null>(null);
     const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
     const [checkedBatchIds, setCheckedBatchIds] = useState<Record<number, { allotted: boolean; details: any }>>({});
+    const [checkingBatchIds, setCheckingBatchIds] = useState<Record<number, boolean>>({});
+
+    // Bulk Allotment Checking
+    const [bulkCheckModalOpen, setBulkCheckModalOpen] = useState(false);
+    const [bulkCheckProvider, setBulkCheckProvider] = useState<string>('auto');
+    const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+    const [bulkNotification, setBulkNotification] = useState<string | null>(null);
+
+    // Live background polling when any batch is checking in background
+    useEffect(() => {
+        const hasCheckingBatches = batches.data.some((b) => b.allotment_details?.checking) || Object.keys(checkingBatchIds).length > 0;
+        if (!hasCheckingBatches) return;
+
+        const interval = setInterval(() => {
+            router.reload({ only: ['batches'], preserveScroll: true });
+        }, 3500);
+
+        return () => clearInterval(interval);
+    }, [batches.data, checkingBatchIds]);
 
     // PAN attach / update modal
     const [panModalBatch, setPanModalBatch] = useState<ApplicationBatch | null>(null);
@@ -225,9 +246,19 @@ export default function ApplicationsIndex({
 
     const handleCheckAllotment = async (batch: ApplicationBatch, provider: string = 'auto') => {
         setAllotmentBatch(batch);
-        setAllotmentLoading(true);
+        setAllotmentLoading(false);
+        setCheckingBatchIds((prev) => ({ ...prev, [batch.id]: true }));
+        setAllotmentResult({
+            success: true,
+            queued: true,
+            status: 'checking',
+            message: `Allotment check has been queued for ${batch.batch_number}. Processing in background...`,
+            batch_id: batch.id,
+            provider,
+            pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
+            pan_masked: batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined,
+        });
         setAllotmentModalOpen(true);
-        setAllotmentResult(null);
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
@@ -246,6 +277,11 @@ export default function ApplicationsIndex({
                     success: false,
                     message: `Application #${batch.batch_number || batch.id} was not found on the server. Please reload the page to refresh records.`,
                 });
+                setCheckingBatchIds((prev) => {
+                    const next = { ...prev };
+                    delete next[batch.id];
+                    return next;
+                });
                 return;
             }
 
@@ -263,25 +299,54 @@ export default function ApplicationsIndex({
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
                 pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
             });
-
-            if (data.success && data.found) {
-                setCheckedBatchIds(prev => ({
-                    ...prev,
-                    [batch.id]: {
-                        allotted: Boolean(data.allotted),
-                        details: data,
-                    },
-                }));
-            }
-
-            router.reload({ preserveScroll: true });
         } catch (err: any) {
             setAllotmentResult({
                 success: false,
-                message: err?.message || 'Failed to query KFintech allotment registry.',
+                message: err?.message || 'Failed to dispatch allotment check in background.',
             });
+            setCheckingBatchIds((prev) => {
+                const next = { ...prev };
+                delete next[batch.id];
+                return next;
+            });
+        }
+    };
+
+    const handleBulkCheckAllotments = async () => {
+        setIsBulkSubmitting(true);
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const targetBatchIds = selectedIpo === 'all'
+                ? batches.data
+                    .filter((b) => b.application_status !== 'allotted' && b.application_status !== 'cancelled')
+                    .map((b) => b.id)
+                : [];
+
+            const response = await fetch('/applications/bulk-check-allotments', {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
+                },
+                body: JSON.stringify({
+                    ipo_id: selectedIpo !== 'all' ? Number(selectedIpo) : undefined,
+                    batch_ids: targetBatchIds.length > 0 ? targetBatchIds : undefined,
+                    provider: bulkCheckProvider,
+                }),
+            });
+
+            const data = await response.json().catch(() => null);
+            setBulkCheckModalOpen(false);
+            setBulkNotification(data?.message || 'Bulk allotment check started in background! Queue workers are processing applications.');
+            setTimeout(() => setBulkNotification(null), 8000);
+
+            router.reload({ only: ['batches'], preserveScroll: true });
+        } catch (err: any) {
+            console.error('Failed to dispatch bulk check', err);
         } finally {
-            setAllotmentLoading(false);
+            setIsBulkSubmitting(false);
         }
     };
 
@@ -439,6 +504,17 @@ export default function ApplicationsIndex({
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
+                        {/* Bulk Allotment Check Button (Background Worker) */}
+                        <Button
+                            type="button"
+                            onClick={() => setBulkCheckModalOpen(true)}
+                            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold h-9 shadow-xs"
+                            title="Run background allotment checks across unallotted applications"
+                        >
+                            <Zap className="mr-1.5 h-3.5 w-3.5 text-amber-300" />
+                            Bulk Check Allotments
+                        </Button>
+
                         {/* CSV Export Option 1: User Rates CSV */}
                         <a
                             href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/user-csv` : '/applications/export/user-csv'}
@@ -471,6 +547,24 @@ export default function ApplicationsIndex({
                         </Button>
                     </div>
                 </div>
+
+                {/* Bulk Check Notification Banner */}
+                {bulkNotification && (
+                    <div className="rounded-xl border border-blue-400/50 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 p-3.5 shadow-sm flex items-center justify-between text-xs text-blue-900 dark:text-blue-200">
+                        <div className="flex items-center gap-2">
+                            <Zap className="h-4 w-4 text-amber-500 animate-pulse" />
+                            <span className="font-medium">{bulkNotification}</span>
+                        </div>
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setBulkNotification(null)}
+                            className="h-6 w-6 p-0 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </Button>
+                    </div>
+                )}
 
                 {/* Pending Approvals Banner for Admin */}
                 {pendingBatchesCount > 0 && isAdmin && (
@@ -883,23 +977,32 @@ export default function ApplicationsIndex({
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         <div className="space-y-1">
-                                                            <Badge
-                                                                variant="outline"
-                                                                className={`text-[10px] uppercase font-semibold ${
-                                                                    isAllotted
-                                                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                                                        : isNotAllotted
-                                                                        ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                                                                        : isPendingApproval
-                                                                        ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                                                                        : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                                                                }`}
-                                                            >
-                                                                {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : batch.application_status.replace('_', ' ')}
-                                                            </Badge>
+                                                            {batch.allotment_details?.checking || checkingBatchIds[batch.id] ? (
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className="text-[10px] uppercase font-bold border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 animate-pulse flex items-center gap-1"
+                                                                >
+                                                                    <Loader2 className="h-2.5 w-2.5 animate-spin text-amber-600" /> Checking Allotment
+                                                                </Badge>
+                                                            ) : (
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className={`text-[10px] uppercase font-semibold ${
+                                                                        isAllotted
+                                                                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                                                            : isNotAllotted
+                                                                            ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                                                                            : isPendingApproval
+                                                                            ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                                                                            : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
+                                                                    }`}
+                                                                >
+                                                                    {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : batch.application_status.replace('_', ' ')}
+                                                                </Badge>
+                                                            )}
 
-                                                            {/* If allotment was scraped, show badge with click to inspect */}
-                                                            {batch.allotment_details && (
+                                                            {/* If allotment was scraped and not actively checking, show badge with click to inspect */}
+                                                            {batch.allotment_details && !batch.allotment_details?.checking && !checkingBatchIds[batch.id] && (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => {
@@ -957,8 +1060,28 @@ export default function ApplicationsIndex({
                                                                 </>
                                                             )}
 
-                                                            {/* Check Allotment Button (Only visible when allotment date is present and reached) */}
-                                                            {showAllotmentButton && (
+                                                            {/* Check Allotment Button or Background Checking Badge */}
+                                                            {batch.allotment_details?.checking || checkingBatchIds[batch.id] ? (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    onClick={() => {
+                                                                        setAllotmentBatch(batch);
+                                                                        setAllotmentResult({
+                                                                            success: true,
+                                                                            queued: true,
+                                                                            status: 'checking',
+                                                                            message: `Checking allotment in background for #${batch.batch_number}...`,
+                                                                            batch_id: batch.id,
+                                                                        });
+                                                                        setAllotmentModalOpen(true);
+                                                                    }}
+                                                                    className="h-7 px-2 text-xs font-semibold border-amber-400 bg-amber-50/80 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700 animate-pulse shadow-2xs"
+                                                                    title="Allotment check running in background across BSE, NSE, and Registrars. Click to view live progress."
+                                                                >
+                                                                    <Loader2 className="h-3 w-3 mr-1 animate-spin text-amber-600" /> Checking...
+                                                                </Button>
+                                                            ) : showAllotmentButton ? (
                                                                 <Button
                                                                     size="sm"
                                                                     variant={isAllotmentToday ? 'default' : 'outline'}
@@ -968,11 +1091,11 @@ export default function ApplicationsIndex({
                                                                             ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
                                                                             : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
                                                                     }`}
-                                                                    title={isAllotmentToday ? 'Today is Allotment Day! Live query KFintech' : `Live query KFintech (Allotment: ${formatIstDate(allotmentDateStr)})`}
+                                                                    title={isAllotmentToday ? 'Today is Allotment Day! Live query in background' : `Check allotment in background (Allotment: ${formatIstDate(allotmentDateStr)})`}
                                                                 >
                                                                     <Search className={`h-3 w-3 mr-1 ${isAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
                                                                 </Button>
-                                                            )}
+                                                            ) : null}
 
                                                             {isPending && (
                                                                 <>
@@ -1259,6 +1382,7 @@ export default function ApplicationsIndex({
                 onClose={() => setAllotmentModalOpen(false)}
                 isLoading={allotmentLoading}
                 result={allotmentResult}
+                batchId={allotmentBatch?.id}
                 companyName={allotmentBatch?.ipo?.company_name}
                 symbol={allotmentBatch?.ipo?.symbol}
                 batchNumber={allotmentBatch?.batch_number}
@@ -1267,6 +1391,16 @@ export default function ApplicationsIndex({
                 applicantName={allotmentBatch?.applicant_name || allotmentBatch?.user_pan?.account_holder_name}
                 currentStatus={allotmentBatch?.application_status}
                 onRecheck={(provider) => allotmentBatch && handleCheckAllotment(allotmentBatch, provider || 'auto')}
+                onStatusUpdate={(updatedData) => {
+                    if (allotmentBatch) {
+                        setCheckingBatchIds((prev) => {
+                            const next = { ...prev };
+                            delete next[allotmentBatch.id];
+                            return next;
+                        });
+                        router.reload({ only: ['batches'], preserveScroll: true });
+                    }
+                }}
                 onMarkStatus={(status) => {
                     if (allotmentBatch) {
                         handleStatusChange(allotmentBatch.id, status);
@@ -1274,6 +1408,138 @@ export default function ApplicationsIndex({
                     }
                 }}
             />
+
+            {/* Bulk Check Allotments Dialog */}
+            <Dialog open={bulkCheckModalOpen} onOpenChange={setBulkCheckModalOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-base font-bold text-neutral-900 dark:text-neutral-100">
+                            <Zap className="h-5 w-5 text-amber-500" />
+                            Bulk Check Allotments (Background Worker)
+                        </DialogTitle>
+                        <DialogDescription className="text-xs text-neutral-500">
+                            Dispatches asynchronous queue jobs to verify allotment for unallotted applications across stock exchanges and registrars.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-3 border border-neutral-200 dark:border-neutral-700 text-xs space-y-1.5">
+                            <div className="flex justify-between">
+                                <span className="text-neutral-500">Target IPO Scope:</span>
+                                <span className="font-semibold text-neutral-800 dark:text-neutral-200">
+                                    {selectedIpo !== 'all'
+                                        ? ipos.find((i) => String(i.id) === selectedIpo)?.company_name || 'Selected IPO'
+                                        : 'All Filtered Unallotted Applications'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-neutral-500">Applications to Process:</span>
+                                <span className="font-bold text-blue-600 dark:text-blue-400">
+                                    {selectedIpo !== 'all'
+                                        ? batches.data.filter((b) => String(b.ipo_id) === selectedIpo && b.application_status !== 'allotted' && b.application_status !== 'cancelled').length
+                                        : batches.data.filter((b) => b.application_status !== 'allotted' && b.application_status !== 'cancelled').length} Applications
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold">Verification Provider</Label>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                <button
+                                    type="button"
+                                    onClick={() => setBulkCheckProvider('auto')}
+                                    className={`p-2.5 rounded-lg border text-left transition-all ${
+                                        bulkCheckProvider === 'auto'
+                                            ? 'border-blue-600 bg-blue-50/80 text-blue-900 dark:bg-blue-950/50 dark:text-blue-200 font-semibold ring-1 ring-blue-500'
+                                            : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-1 font-bold">
+                                        <Sparkles className="h-3.5 w-3.5 text-amber-500" /> Auto Smart Scan
+                                    </div>
+                                    <p className="text-[10px] text-neutral-500 mt-0.5">BSE API → NSE Scraper → KFintech</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setBulkCheckProvider('bse')}
+                                    className={`p-2.5 rounded-lg border text-left transition-all ${
+                                        bulkCheckProvider === 'bse'
+                                            ? 'border-indigo-600 bg-indigo-50/80 text-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-200 font-semibold ring-1 ring-indigo-500'
+                                            : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-1 font-bold">
+                                        <span className="h-2 w-2 rounded-full bg-indigo-500" /> BSE India
+                                    </div>
+                                    <p className="text-[10px] text-neutral-500 mt-0.5">Direct official exchange API</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setBulkCheckProvider('nse')}
+                                    className={`p-2.5 rounded-lg border text-left transition-all ${
+                                        bulkCheckProvider === 'nse'
+                                            ? 'border-amber-600 bg-amber-50/80 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 font-semibold ring-1 ring-amber-500'
+                                            : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-1 font-bold">
+                                        <span className="h-2 w-2 rounded-full bg-amber-500" /> NSE India
+                                    </div>
+                                    <p className="text-[10px] text-neutral-500 mt-0.5">Headless Chrome scraper</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setBulkCheckProvider('kfintech')}
+                                    className={`p-2.5 rounded-lg border text-left transition-all ${
+                                        bulkCheckProvider === 'kfintech'
+                                            ? 'border-blue-600 bg-blue-50/80 text-blue-900 dark:bg-blue-950/50 dark:text-blue-200 font-semibold ring-1 ring-blue-500'
+                                            : 'border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-1 font-bold">
+                                        <span className="h-2 w-2 rounded-full bg-blue-500" /> KFintech
+                                    </div>
+                                    <p className="text-[10px] text-neutral-500 mt-0.5">Registrar gateway</p>
+                                </button>
+                            </div>
+                        </div>
+
+                        <p className="text-[11px] text-neutral-500">
+                            💡 Processing runs completely in the background via queue worker. You can navigate, close the browser, or monitor live status on this page.
+                        </p>
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setBulkCheckModalOpen(false)}
+                            disabled={isBulkSubmitting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleBulkCheckAllotments}
+                            disabled={isBulkSubmitting}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs"
+                        >
+                            {isBulkSubmitting ? (
+                                <>
+                                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Dispatching...
+                                </>
+                            ) : (
+                                <>
+                                    <Zap className="mr-1.5 h-3.5 w-3.5 text-amber-300" /> Start Bulk Check
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Delete Batch Confirmation Modal */}
             <Dialog open={!!deletingBatch} onOpenChange={() => setDeletingBatch(null)}>

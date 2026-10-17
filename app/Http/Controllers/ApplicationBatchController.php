@@ -348,72 +348,91 @@ class ApplicationBatchController extends Controller
         }
 
         $provider = strtolower((string) $request->input('provider', 'auto'));
+        $isSync = $request->input('sync') === '1' || $request->input('background') === '0';
 
-        $result = match ($provider) {
-            'nse' => \App\Services\NseAllotmentService::checkBatchAllotment($batch),
-            'bse' => \App\Services\BseAllotmentService::checkBatchAllotment($batch),
-            'kfintech' => \App\Services\KfintechAllotmentService::checkBatchAllotment($batch),
-            default => $this->performAutoCheckAllotment($batch),
-        };
+        // Synchronous check if requested
+        if ($isSync) {
+            $result = \App\Services\ApplicationBatchService::executeCheckAllotment($batch, $provider);
+
+            if ($request->wantsJson()) {
+                return response()->json($result);
+            }
+
+            if ($result['success'] && ($result['found'] ?? false)) {
+                $statusMsg = ($result['allotted'] ?? false) ? 'ALLOTTED' : 'NOT ALLOTTED';
+                $src = strtoupper($result['provider'] ?? 'EXCHANGE');
+                return back()->with('success', "Allotment status from {$src}: {$statusMsg}.");
+            }
+
+            return back()->with('info', $result['message'] ?? 'No allotment record found.');
+        }
+
+        // Default: Process in background
+        \App\Services\ApplicationBatchService::markChecking($batch);
+        \App\Jobs\CheckBatchAllotmentJob::dispatch($batch, $provider);
 
         if ($request->wantsJson()) {
-            return response()->json($result);
+            return response()->json([
+                'success' => true,
+                'queued' => true,
+                'status' => 'checking',
+                'message' => "Allotment check running in background for {$batch->batch_number}.",
+                'batch_id' => $batch->id,
+                'batch_number' => $batch->batch_number,
+                'provider' => $provider,
+            ]);
         }
 
-        if ($result['success'] && ($result['found'] ?? false)) {
-            $statusMsg = ($result['allotted'] ?? false) ? 'ALLOTTED' : 'NOT ALLOTTED';
-            $src = strtoupper($result['provider'] ?? 'EXCHANGE');
-            return back()->with('success', "Allotment status from {$src}: {$statusMsg}.");
-        }
-
-        return back()->with('info', $result['message'] ?? 'No allotment record found.');
+        return back()->with('info', "Allotment check running in background for {$batch->batch_number}. Results will sync automatically.");
     }
 
     /**
-     * Cascading multi-provider allotment checker.
-     * Tries KFintech (if matched/configured) -> BSE (fast ~300ms) -> NSE (headless browser ~10s).
+     * Get live allotment status and check progress for a batch.
      */
-    private function performAutoCheckAllotment(ApplicationBatch $batch): array
+    public function allotmentStatus(Request $request, ApplicationBatch $batch): \Illuminate\Http\JsonResponse
     {
-        $ipo = $batch->ipo;
-        $registrar = strtolower((string) ($ipo?->registrar ?? ''));
-
-        // 1. If IPO registrar is KFintech, check KFintech first
-        if (str_contains($registrar, 'kfin') || ! empty($ipo?->kfin_client_id)) {
-            $kfinResult = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
-            if ($kfinResult['success'] && ($kfinResult['found'] ?? false)) {
-                return $kfinResult;
-            }
+        $user = $request->user();
+        if (! $user->isAdmin() && $batch->user_id !== $user->id) {
+            abort(403, 'Unauthorized.');
         }
 
-        // 2. Check BSE India (Instant REST API)
-        $bseResult = \App\Services\BseAllotmentService::checkBatchAllotment($batch);
-        if ($bseResult['success'] && ($bseResult['found'] ?? false)) {
-            return $bseResult;
-        }
+        $details = is_array($batch->allotment_details) ? $batch->allotment_details : [];
+        $isChecking = (bool) ($details['checking'] ?? false);
 
-        // 3. Check NSE India (Headless scraper with captcha bypass)
-        $nseResult = \App\Services\NseAllotmentService::checkBatchAllotment($batch);
-        if ($nseResult['success'] && ($nseResult['found'] ?? false)) {
-            return $nseResult;
-        }
-
-        // If none found a record, prioritize the most descriptive result
-        if (! empty($nseResult['message']) && ($nseResult['success'] ?? false)) {
-            return $nseResult;
-        }
-
-        if (! empty($bseResult['message']) && ($bseResult['success'] ?? false)) {
-            return $bseResult;
-        }
-
-        return [
+        return response()->json([
             'success' => true,
-            'status' => 'not_found_anywhere',
-            'found' => false,
-            'message' => 'No allotment records found on BSE, NSE, or registrar portals for this application.',
-            'provider' => 'auto',
-        ];
+            'is_checking' => $isChecking,
+            'application_status' => $batch->application_status,
+            'allotment_details' => $batch->allotment_details,
+            'allotment_checked_at' => $batch->allotment_checked_at,
+        ]);
+    }
+
+    /**
+     * Dispatch bulk background allotment checks.
+     */
+    public function bulkCheckAllotments(Request $request): \Illuminate\Http\JsonResponse|RedirectResponse
+    {
+        $user = $request->user();
+        if (! $user->isAdmin()) {
+            abort(403, 'Only admins can perform bulk allotment checks.');
+        }
+
+        $batchIds = (array) $request->input('batch_ids', []);
+        $ipoId = $request->input('ipo_id') ? (int) $request->input('ipo_id') : null;
+        $provider = (string) $request->input('provider', 'auto');
+
+        \App\Jobs\CheckBulkAllotmentsJob::dispatch($batchIds, $ipoId, $provider, $user->id);
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'queued' => true,
+                'message' => 'Bulk allotment check started in background.',
+            ]);
+        }
+
+        return back()->with('success', 'Bulk allotment check started in background. Results will sync automatically.');
     }
 
     public function approve(Request $request, ApplicationBatch $batch): RedirectResponse

@@ -17,7 +17,7 @@ import {
     XCircle,
     Zap,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -48,6 +48,7 @@ export interface AllotmentResultData {
     provider?: 'nse' | 'bse' | 'kfintech' | 'auto' | string;
     kfin_ipo_name?: string | null;
     checked_at?: string | null;
+    queued?: boolean;
 }
 
 export type AllotmentProviderTab = 'smart' | 'nse' | 'bse' | 'kfintech' | 'registrars';
@@ -57,6 +58,7 @@ interface MultiSourceAllotmentModalProps {
     onClose: () => void;
     isLoading: boolean;
     result: AllotmentResultData | null;
+    batchId?: number;
     companyName?: string;
     symbol?: string;
     batchNumber?: string;
@@ -66,6 +68,7 @@ interface MultiSourceAllotmentModalProps {
     currentStatus?: string;
     onRecheck?: (provider?: 'auto' | 'nse' | 'bse' | 'kfintech') => void;
     onMarkStatus?: (status: 'allotted' | 'not_allotted') => void;
+    onStatusUpdate?: (statusData: any) => void;
 }
 
 export default function KfintechAllotmentModal({
@@ -73,6 +76,7 @@ export default function KfintechAllotmentModal({
     onClose,
     isLoading,
     result,
+    batchId,
     companyName,
     symbol,
     batchNumber,
@@ -82,27 +86,104 @@ export default function KfintechAllotmentModal({
     currentStatus,
     onRecheck,
     onMarkStatus,
+    onStatusUpdate,
 }: MultiSourceAllotmentModalProps) {
     const [activeTab, setActiveTab] = useState<AllotmentProviderTab>('smart');
     const [copiedField, setCopiedField] = useState<string | null>(null);
+    const [liveResult, setLiveResult] = useState<AllotmentResultData | null>(result);
+    const [isCheckingBackground, setIsCheckingBackground] = useState<boolean>(false);
 
-    const isAllotted = Boolean(result?.allotted);
-    const isFound = Boolean(result?.found);
+    // Keep liveResult synchronized with prop changes
+    useEffect(() => {
+        setLiveResult(result);
+        if (result?.status === 'checking' || result?.queued) {
+            setIsCheckingBackground(true);
+        } else if (result && result.status !== 'checking') {
+            setIsCheckingBackground(false);
+        }
+    }, [result]);
+
+    // Live background polling when an allotment check is queued or running
+    useEffect(() => {
+        if (!isOpen || !batchId || !isCheckingBackground) {
+            return;
+        }
+
+        let isMounted = true;
+        const pollInterval = setInterval(async () => {
+            try {
+                const response = await fetch(`/applications/${batchId}/allotment-status`, {
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                });
+
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (!isMounted || !data.success) return;
+
+                if (!data.is_checking) {
+                    setIsCheckingBackground(false);
+                    clearInterval(pollInterval);
+
+                    const details = data.allotment_details || {};
+                    const hasAllotmentInfo = details.allotted !== undefined || details.allotted_shares !== undefined || Boolean(data.allotment_checked_at);
+                    
+                    const updatedResult: AllotmentResultData = {
+                        success: true,
+                        found: hasAllotmentInfo,
+                        status: data.application_status,
+                        allotted: Boolean(details.allotted || data.application_status === 'allotted'),
+                        all_shares: details.allotted_shares ?? (details.all_shares ?? 0),
+                        app_shares: details.applied_shares ?? (details.app_shares ?? 0),
+                        application_number: details.application_number || applicationNumber,
+                        order_number: details.order_number,
+                        upi_amount: details.upi_amount,
+                        upi_status: details.upi_status,
+                        allotment_price: details.allotment_price,
+                        provider: details.source || 'auto',
+                        name_from_pan: details.name_from_pan,
+                        dp_clid: details.dp_clid,
+                        pan_masked: details.pan_masked,
+                        pan_full: panNumber || undefined,
+                        checked_at: details.checked_at || data.allotment_checked_at,
+                        message: hasAllotmentInfo ? undefined : 'Verification completed. No allotment record found on exchange / registry.',
+                    };
+
+                    setLiveResult(updatedResult);
+                    onStatusUpdate?.(data);
+                }
+            } catch (err) {
+                console.error('Failed to poll allotment status', err);
+            }
+        }, 2500);
+
+        return () => {
+            isMounted = false;
+            clearInterval(pollInterval);
+        };
+    }, [isOpen, batchId, isCheckingBackground, applicationNumber, panNumber, onStatusUpdate]);
+
+    const activeResult = liveResult ?? result;
+    const isAllotted = Boolean(activeResult?.allotted);
+    const isFound = Boolean(activeResult?.found);
 
     const effectivePan =
         panNumber ||
-        result?.pan_full ||
-        result?.pan ||
-        result?.pan_masked ||
+        activeResult?.pan_full ||
+        activeResult?.pan ||
+        activeResult?.pan_masked ||
         '';
 
     const effectiveAppNo =
         applicationNumber ||
-        result?.application_number ||
+        activeResult?.application_number ||
         batchNumber ||
         '';
 
-    const effectiveSymbol = (symbol || result?.symbol || '').toUpperCase().trim();
+    const effectiveSymbol = (symbol || activeResult?.symbol || '').toUpperCase().trim();
 
     const handleCopy = (text: string, fieldName: string) => {
         if (!text) return;
@@ -257,8 +338,49 @@ export default function KfintechAllotmentModal({
                         </div>
                     ) : (
                         <>
-                            {/* VERIFIED RESULT CARD (Displayed whenever result exists and was found!) */}
-                            {result?.success && isFound && (
+                            {/* BACKGROUND CHECK IN PROGRESS BANNER */}
+                            {(isCheckingBackground || activeResult?.status === 'checking' || activeResult?.queued) && (
+                                <div className="rounded-xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-amber-500/10 border border-blue-500/30 p-4 space-y-3 dark:from-blue-950/40 dark:via-indigo-950/40 dark:to-amber-950/30">
+                                    <div className="flex items-start gap-3">
+                                        <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shrink-0">
+                                            <Loader2 className="h-5 w-5 animate-spin" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <h4 className="text-xs font-bold uppercase tracking-wider text-blue-950 dark:text-blue-100 flex items-center gap-1.5">
+                                                    <Zap className="h-3.5 w-3.5 text-amber-500 animate-pulse" />
+                                                    Checking Allotment in Background
+                                                </h4>
+                                                <span className="relative flex h-2 w-2">
+                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-neutral-600 dark:text-neutral-300 mt-1 leading-relaxed">
+                                                Server queue workers are processing across BSE India, NSE India, and Registrars.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-lg bg-white/80 dark:bg-black/40 p-2.5 text-[11px] text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-2">
+                                        <span className="truncate">
+                                            ⚡ You can <strong>close this modal anytime</strong>. Processing continues in the background and status updates automatically.
+                                        </span>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={onClose}
+                                            className="h-6 px-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                                        >
+                                            Dismiss Modal
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* VERIFIED RESULT CARD (Displayed whenever result exists, was found, and not currently checking) */}
+                            {activeResult?.success && isFound && !isCheckingBackground && activeResult.status !== 'checking' && (
                                 <div className="space-y-3">
                                     {/* Allotment Status Banner */}
                                     <div
@@ -299,7 +421,7 @@ export default function KfintechAllotmentModal({
                                                 </div>
                                                 <p className="text-base sm:text-lg font-black tracking-tight mt-0.5">
                                                     {isAllotted
-                                                        ? `${result.all_shares ?? 0} Shares Allotted!`
+                                                        ? `${activeResult.all_shares ?? 0} Shares Allotted!`
                                                         : '0 Shares Allotted'}
                                                 </p>
                                             </div>
@@ -307,11 +429,11 @@ export default function KfintechAllotmentModal({
 
                                         <div className="text-right shrink-0">
                                             <Badge variant="outline" className="text-[10px] font-mono">
-                                                {providerLabel(result.provider)}
+                                                {providerLabel(activeResult.provider)}
                                             </Badge>
-                                            {result.allotment_price && (
+                                            {activeResult.allotment_price && (
                                                 <span className="text-xs text-neutral-500 block mt-1">
-                                                    Price: ₹{result.allotment_price}
+                                                    Price: ₹{activeResult.allotment_price}
                                                 </span>
                                             )}
                                         </div>
@@ -324,7 +446,7 @@ export default function KfintechAllotmentModal({
                                                 Applied Shares
                                             </span>
                                             <span className="font-bold text-neutral-900 dark:text-neutral-100">
-                                                {result.app_shares ?? '—'} Shares
+                                                {activeResult.app_shares ?? '—'} Shares
                                             </span>
                                         </div>
 
@@ -339,7 +461,7 @@ export default function KfintechAllotmentModal({
                                                         : 'text-neutral-800 dark:text-neutral-200'
                                                 }`}
                                             >
-                                                {result.all_shares ?? 0} Shares
+                                                {activeResult.all_shares ?? 0} Shares
                                             </span>
                                         </div>
 
@@ -348,28 +470,28 @@ export default function KfintechAllotmentModal({
                                                 Application No
                                             </span>
                                             <span className="font-mono font-semibold text-neutral-800 dark:text-neutral-200 truncate block">
-                                                {result.application_number || '—'}
+                                                {activeResult.application_number || '—'}
                                             </span>
                                         </div>
 
-                                        {result.order_number && (
+                                        {activeResult.order_number && (
                                             <div className="space-y-0.5">
                                                 <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold block">
                                                     Exchange Order #
                                                 </span>
                                                 <span className="font-mono font-semibold text-neutral-800 dark:text-neutral-200 truncate block">
-                                                    {result.order_number}
+                                                    {activeResult.order_number}
                                                 </span>
                                             </div>
                                         )}
 
-                                        {result.upi_amount && (
+                                        {activeResult.upi_amount && (
                                             <div className="space-y-0.5">
                                                 <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold block">
                                                     Blocked Amount
                                                 </span>
                                                 <span className="font-semibold text-neutral-800 dark:text-neutral-200">
-                                                    ₹{Number(result.upi_amount).toLocaleString('en-IN')}
+                                                    ₹{Number(activeResult.upi_amount).toLocaleString('en-IN')}
                                                 </span>
                                             </div>
                                         )}
@@ -388,9 +510,9 @@ export default function KfintechAllotmentModal({
                                         <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
                                             <Check className="h-3 w-3" /> Saved & synced to application database
                                         </span>
-                                        {result.checked_at && (
+                                        {activeResult.checked_at && (
                                             <span className="text-[10px] text-neutral-400">
-                                                {new Date(result.checked_at).toLocaleTimeString('en-IN', {
+                                                {new Date(activeResult.checked_at).toLocaleTimeString('en-IN', {
                                                     hour: '2-digit',
                                                     minute: '2-digit',
                                                 })}
@@ -401,7 +523,7 @@ export default function KfintechAllotmentModal({
                             )}
 
                             {/* NOT FOUND NOTIFICATION */}
-                            {result && (!result.success || !isFound) && (
+                            {activeResult && !isCheckingBackground && activeResult.status !== 'checking' && (!activeResult.success || !isFound) && (
                                 <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 p-3.5 border border-amber-200 dark:border-amber-800/70 flex items-start gap-2.5">
                                     <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                                     <div className="text-xs">
@@ -409,7 +531,7 @@ export default function KfintechAllotmentModal({
                                             No Allotment Record Found
                                         </h4>
                                         <p className="text-amber-700 dark:text-amber-300 mt-0.5">
-                                            {result.message ||
+                                            {activeResult.message ||
                                                 'The selected source has not finalized or published allotment for this application yet.'}
                                         </p>
                                     </div>

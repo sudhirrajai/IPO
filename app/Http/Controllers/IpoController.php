@@ -322,16 +322,12 @@ class IpoController extends Controller
         return back()->with('success', "Auto-approval for fix rate applications is now {$state} for {$ipo->company_name}.");
     }
 
-    public function checkAllotments(Ipo $ipo): RedirectResponse
+    public function checkAllotments(Request $request, Ipo $ipo): RedirectResponse
     {
-        \Illuminate\Support\Facades\Artisan::call('ipo:check-allotment', [
-            '--ipo_id' => $ipo->id,
-            '--force' => true,
-        ]);
+        $provider = (string) $request->input('provider', 'auto');
+        \App\Jobs\CheckBulkAllotmentsJob::dispatch([], $ipo->id, $provider, $request->user()?->id);
 
-        $output = trim(\Illuminate\Support\Facades\Artisan::output());
-
-        return back()->with('success', "Allotment check completed: {$output}");
+        return back()->with('success', "Background allotment check started for {$ipo->company_name}. Applications are syncing in the background.");
     }
 
     public function toggleFavorite(Request $request, Ipo $ipo): RedirectResponse
