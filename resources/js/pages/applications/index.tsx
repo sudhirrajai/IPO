@@ -1248,15 +1248,26 @@ export default function ApplicationsIndex({
                 </DialogContent>
             </Dialog>
 
-            {/* KFintech Allotment Status Modal */}
+            {/* Multi-Provider Allotment Status Modal */}
             <KfintechAllotmentModal
                 isOpen={allotmentModalOpen}
                 onClose={() => setAllotmentModalOpen(false)}
                 isLoading={allotmentLoading}
                 result={allotmentResult}
                 companyName={allotmentBatch?.ipo?.company_name}
+                symbol={allotmentBatch?.ipo?.symbol}
                 batchNumber={allotmentBatch?.batch_number}
+                applicationNumber={allotmentBatch?.application_number || allotmentBatch?.batch_number}
+                panNumber={allotmentBatch?.pan_number || allotmentBatch?.batch_pans?.[0]?.pan_number_snapshot}
+                applicantName={allotmentBatch?.applicant_name || allotmentBatch?.user_pan?.account_holder_name}
+                currentStatus={allotmentBatch?.application_status}
                 onRecheck={() => allotmentBatch && handleCheckAllotment(allotmentBatch)}
+                onMarkStatus={(status) => {
+                    if (allotmentBatch) {
+                        handleStatusChange(allotmentBatch.id, status);
+                        setAllotmentModalOpen(false);
+                    }
+                }}
             />
 
             {/* Delete Batch Confirmation Modal */}
