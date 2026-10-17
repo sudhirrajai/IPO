@@ -322,6 +322,7 @@ class KfintechAllotmentService
 
         $result['kfin_ipo_name'] = $kfinIpo['name'];
         $result['pan'] = $pan;
+        $result['provider'] = 'kfintech';
         return $result;
     }
 }

@@ -426,7 +426,7 @@ export default function IpoShow({
         return Array.from(groupsMap.values());
     }, [filteredBatches, checkedBatchIds]);
 
-    const handleCheckAllotment = async (batch: ApplicationBatch) => {
+    const handleCheckAllotment = async (batch: ApplicationBatch, provider: string = 'auto') => {
         setAllotmentBatch(batch);
         setAllotmentLoading(true);
         setAllotmentModalOpen(true);
@@ -434,7 +434,7 @@ export default function IpoShow({
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-            const response = await fetch(`/applications/${batch.id}/check-allotment`, {
+            const response = await fetch(`/applications/${batch.id}/check-allotment?provider=${encodeURIComponent(provider)}`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
@@ -1705,7 +1705,7 @@ export default function IpoShow({
                                                             {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : (batch.application_status.replace('_', ' '))}
                                                         </Badge>
 
-                                                        {/* KFintech Scraped Info */}
+                                                        {/* Allotment Details Info */}
                                                         {batch.allotment_details && (
                                                             <button
                                                                 type="button"
@@ -1718,6 +1718,11 @@ export default function IpoShow({
                                                                         all_shares: batch.allotment_details?.allotted_shares,
                                                                         app_shares: batch.allotment_details?.applied_shares,
                                                                         application_number: batch.allotment_details?.application_number,
+                                                                        order_number: batch.allotment_details?.order_number,
+                                                                        upi_amount: batch.allotment_details?.upi_amount,
+                                                                        upi_status: batch.allotment_details?.upi_status,
+                                                                        allotment_price: batch.allotment_details?.allotment_price,
+                                                                        provider: batch.allotment_details?.source,
                                                                         name_from_pan: batch.allotment_details?.name_from_pan,
                                                                         dp_clid: batch.allotment_details?.dp_clid,
                                                                         pan_masked: batch.allotment_details?.pan_masked,
@@ -1729,7 +1734,7 @@ export default function IpoShow({
                                                                 }}
                                                                 className="block text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-medium"
                                                             >
-                                                                KFintech Details ↗
+                                                                {(batch.allotment_details?.source?.toUpperCase() || 'Allotment') + ' Details ↗'}
                                                             </button>
                                                         )}
                                                     </div>
@@ -3861,7 +3866,7 @@ export default function IpoShow({
                 panNumber={allotmentBatch?.pan_number || allotmentBatch?.batch_pans?.[0]?.pan_number_snapshot}
                 applicantName={allotmentBatch?.applicant_name || allotmentBatch?.user_pan?.account_holder_name}
                 currentStatus={allotmentBatch?.application_status}
-                onRecheck={() => allotmentBatch && handleCheckAllotment(allotmentBatch)}
+                onRecheck={(provider) => allotmentBatch && handleCheckAllotment(allotmentBatch, provider || 'auto')}
                 onMarkStatus={(status) => {
                     if (allotmentBatch) {
                         handleStatusChange(allotmentBatch.id, status);

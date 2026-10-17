@@ -35,6 +35,7 @@
         "concurrently": "^10.0.3",
         "laravel-vite-plugin": "^3.0.0",
         "lucide-react": "^0.475.0",
+        "puppeteer-core": "^25.14.0",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
         "sonner": "^2.0.0",

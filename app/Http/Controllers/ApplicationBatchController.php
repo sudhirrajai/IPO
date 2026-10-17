@@ -347,18 +347,73 @@ class ApplicationBatchController extends Controller
             abort(403, 'Unauthorized.');
         }
 
-        $result = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
+        $provider = strtolower((string) $request->input('provider', 'auto'));
+
+        $result = match ($provider) {
+            'nse' => \App\Services\NseAllotmentService::checkBatchAllotment($batch),
+            'bse' => \App\Services\BseAllotmentService::checkBatchAllotment($batch),
+            'kfintech' => \App\Services\KfintechAllotmentService::checkBatchAllotment($batch),
+            default => $this->performAutoCheckAllotment($batch),
+        };
 
         if ($request->wantsJson()) {
             return response()->json($result);
         }
 
-        if ($result['success'] && $result['found']) {
-            $statusMsg = $result['allotted'] ? 'ALLOTTED' : 'NOT ALLOTTED';
-            return back()->with('success', "Allotment status from KFintech: {$statusMsg}. (Name: {$result['name_from_pan']})");
+        if ($result['success'] && ($result['found'] ?? false)) {
+            $statusMsg = ($result['allotted'] ?? false) ? 'ALLOTTED' : 'NOT ALLOTTED';
+            $src = strtoupper($result['provider'] ?? 'EXCHANGE');
+            return back()->with('success', "Allotment status from {$src}: {$statusMsg}.");
         }
 
-        return back()->with('info', $result['message'] ?? 'No allotment record found on KFintech.');
+        return back()->with('info', $result['message'] ?? 'No allotment record found.');
+    }
+
+    /**
+     * Cascading multi-provider allotment checker.
+     * Tries KFintech (if matched/configured) -> BSE (fast ~300ms) -> NSE (headless browser ~10s).
+     */
+    private function performAutoCheckAllotment(ApplicationBatch $batch): array
+    {
+        $ipo = $batch->ipo;
+        $registrar = strtolower((string) ($ipo?->registrar ?? ''));
+
+        // 1. If IPO registrar is KFintech, check KFintech first
+        if (str_contains($registrar, 'kfin') || ! empty($ipo?->kfin_client_id)) {
+            $kfinResult = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
+            if ($kfinResult['success'] && ($kfinResult['found'] ?? false)) {
+                return $kfinResult;
+            }
+        }
+
+        // 2. Check BSE India (Instant REST API)
+        $bseResult = \App\Services\BseAllotmentService::checkBatchAllotment($batch);
+        if ($bseResult['success'] && ($bseResult['found'] ?? false)) {
+            return $bseResult;
+        }
+
+        // 3. Check NSE India (Headless scraper with captcha bypass)
+        $nseResult = \App\Services\NseAllotmentService::checkBatchAllotment($batch);
+        if ($nseResult['success'] && ($nseResult['found'] ?? false)) {
+            return $nseResult;
+        }
+
+        // If none found a record, prioritize the most descriptive result
+        if (! empty($nseResult['message']) && ($nseResult['success'] ?? false)) {
+            return $nseResult;
+        }
+
+        if (! empty($bseResult['message']) && ($bseResult['success'] ?? false)) {
+            return $bseResult;
+        }
+
+        return [
+            'success' => true,
+            'status' => 'not_found_anywhere',
+            'found' => false,
+            'message' => 'No allotment records found on BSE, NSE, or registrar portals for this application.',
+            'provider' => 'auto',
+        ];
     }
 
     public function approve(Request $request, ApplicationBatch $batch): RedirectResponse
