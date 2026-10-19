@@ -75,7 +75,7 @@ class CsvExportService
             'Batch ID',
             'IPO Name',
             'Symbol',
-            'Applicant Name',
+            'Name of PAN Holder',
             'PAN Number',
             'Application Count',
             'Funding Source',
@@ -90,13 +90,15 @@ class CsvExportService
             $pans = $batch->batchPans;
             $panDisplay = $pans->count() > 0
                 ? $pans->pluck('pan_number_snapshot')->join(', ')
-                : 'N/A';
+                : ($batch->pan_number ?: 'N/A');
+
+            $holderName = $batch->getPanHolderName();
 
             $rows[] = [
                 $batch->batch_number,
                 $ipo->company_name,
                 $ipo->symbol ?? '',
-                $batch->user->name ?? 'N/A',
+                $holderName,
                 $panDisplay,
                 $batch->application_count,
                 $batch->funding_source === 'my_money' ? 'My Money' : 'User Money',
@@ -228,10 +230,16 @@ class CsvExportService
 
             if ($pans->count() > 0) {
                 foreach ($pans as $pan) {
-                    $holderName = $pan->userPan?->account_holder_name
-                        ?: ($batch->applicant_name ?: ($batch->user?->name ?: 'Applicant'));
                     $panNumber = $pan->pan_number_snapshot
                         ?: ($pan->userPan?->pan_number ?: ($batch->pan_number ?: 'N/A'));
+
+                    $holderName = $pan->userPan?->account_holder_name;
+                    if (empty($holderName) && $panNumber !== 'N/A') {
+                        $holderName = \App\Models\UserPan::where('pan_number', strtoupper(trim($panNumber)))->value('account_holder_name');
+                    }
+                    if (empty($holderName)) {
+                        $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
+                    }
 
                     $rows[] = [
                         $serialNo++,
@@ -242,8 +250,14 @@ class CsvExportService
                 }
             } else {
                 $count = max(1, (int) $batch->application_count);
-                $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
                 $panNumber = $batch->pan_number ?: 'N/A';
+                $holderName = null;
+                if ($panNumber !== 'N/A') {
+                    $holderName = \App\Models\UserPan::where('pan_number', strtoupper(trim($panNumber)))->value('account_holder_name');
+                }
+                if (empty($holderName)) {
+                    $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
+                }
 
                 for ($i = 0; $i < $count; $i++) {
                     $rows[] = [
@@ -311,10 +325,16 @@ class CsvExportService
 
             if ($pans->count() > 0) {
                 foreach ($pans as $pan) {
-                    $holderName = $pan->userPan?->account_holder_name
-                        ?: ($batch->applicant_name ?: ($batch->user?->name ?: 'Applicant'));
                     $panNumber = $pan->pan_number_snapshot
                         ?: ($pan->userPan?->pan_number ?: ($batch->pan_number ?: 'N/A'));
+
+                    $holderName = $pan->userPan?->account_holder_name;
+                    if (empty($holderName) && $panNumber !== 'N/A') {
+                        $holderName = \App\Models\UserPan::where('pan_number', strtoupper(trim($panNumber)))->value('account_holder_name');
+                    }
+                    if (empty($holderName)) {
+                        $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
+                    }
 
                     $rows[] = [
                         $serialNo++,
@@ -325,8 +345,14 @@ class CsvExportService
                 }
             } else {
                 $count = max(1, (int) $batch->application_count);
-                $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
                 $panNumber = $batch->pan_number ?: 'N/A';
+                $holderName = null;
+                if ($panNumber !== 'N/A') {
+                    $holderName = \App\Models\UserPan::where('pan_number', strtoupper(trim($panNumber)))->value('account_holder_name');
+                }
+                if (empty($holderName)) {
+                    $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
+                }
 
                 for ($i = 0; $i < $count; $i++) {
                     $rows[] = [

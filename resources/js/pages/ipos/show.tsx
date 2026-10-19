@@ -159,7 +159,8 @@ export default function IpoShow({
         return batches.filter((batch) => {
             const pans = batch.batch_pans || [];
             const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
-            const applicant = (batch.applicant_name || batch.user?.name || '').toLowerCase();
+            const panHolder = pans[0]?.user_pan?.account_holder_name;
+            const applicant = (panHolder || batch.applicant_name || batch.user?.name || '').toLowerCase();
             const batchNum = (batch.batch_number || '').toLowerCase();
             const pan = panNumberRaw.toLowerCase();
             const bank = (batch.bank_name || '').toLowerCase();
@@ -1607,7 +1608,7 @@ export default function IpoShow({
                                                 </td>
                                                 <td className="py-3 px-3">
                                                     <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
-                                                        {batch.applicant_name || batch.user?.name || 'Applicant'}
+                                                        {batch.batch_pans?.[0]?.user_pan?.account_holder_name || batch.applicant_name || batch.user?.name || 'Applicant'}
                                                     </span>
                                                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                                         <span className="font-mono text-[11px] text-neutral-400">

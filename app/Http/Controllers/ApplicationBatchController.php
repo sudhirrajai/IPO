@@ -491,29 +491,35 @@ class ApplicationBatchController extends Controller
         ]);
 
         $panNum = null;
+        $savedPan = null;
         if (! empty($validated['pan_id'])) {
             $savedPan = UserPan::find($validated['pan_id']);
             if ($savedPan) {
                 $panNum = strtoupper($savedPan->pan_number);
-                if (empty($validated['applicant_name']) && ! empty($savedPan->account_holder_name)) {
+                if (! empty($savedPan->account_holder_name) && (empty($validated['applicant_name']) || $validated['applicant_name'] === $batch->applicant_name)) {
                     $validated['applicant_name'] = $savedPan->account_holder_name;
                 }
             }
         } elseif (! empty($validated['pan_number'])) {
             $panNum = strtoupper(trim($validated['pan_number']));
-            UserPan::firstOrCreate([
+            $savedPan = UserPan::firstOrCreate([
                 'user_id' => $batch->user_id,
                 'pan_number' => $panNum,
             ], [
                 'account_holder_name' => $validated['applicant_name'] ?? $batch->applicant_name ?? 'Applicant',
                 'status' => 'active',
             ]);
+            if (empty($validated['applicant_name']) && ! empty($savedPan->account_holder_name)) {
+                $validated['applicant_name'] = $savedPan->account_holder_name;
+            }
         }
 
         if ($panNum) {
             $updateData = ['pan_number' => $panNum];
             if (! empty($validated['applicant_name'])) {
                 $updateData['applicant_name'] = $validated['applicant_name'];
+            } elseif ($savedPan && ! empty($savedPan->account_holder_name)) {
+                $updateData['applicant_name'] = $savedPan->account_holder_name;
             }
             $batch->update($updateData);
 
@@ -521,14 +527,15 @@ class ApplicationBatchController extends Controller
             if ($batchPan) {
                 $batchPan->update([
                     'pan_number_snapshot' => $panNum,
-                    'user_pan_id' => $validated['pan_id'] ?? $batchPan->user_pan_id,
+                    'user_pan_id' => $validated['pan_id'] ?? $savedPan?->id ?? $batchPan->user_pan_id,
                 ]);
             } else {
                 $batch->batchPans()->create([
-                    'user_pan_id' => $validated['pan_id'] ?? null,
+                    'user_pan_id' => $validated['pan_id'] ?? $savedPan?->id,
+                    'sequence_number' => 1,
                     'pan_number_snapshot' => $panNum,
-                    'shares_allotted' => 0,
-                    'is_allotted' => false,
+                    'allotment_status' => 'pending',
+                    'allotted_shares' => 0,
                 ]);
             }
 

@@ -70,6 +70,25 @@ class UserPanController extends Controller
         try {
             $pan = PanService::createPanForUser($targetUserId, $validated);
 
+            // If an account_holder_name is provided, sync any existing batches with this pan_number
+            if (! empty($validated['account_holder_name'])) {
+                $batches = \App\Models\ApplicationBatch::where('pan_number', $pan->pan_number)->get();
+                foreach ($batches as $b) {
+                    if (empty($b->applicant_name) || $b->applicant_name === 'Applicant') {
+                        $b->update(['applicant_name' => $validated['account_holder_name']]);
+                    }
+                    if (! $b->batchPans()->where('user_pan_id', $pan->id)->exists()) {
+                        $b->batchPans()->create([
+                            'user_pan_id' => $pan->id,
+                            'sequence_number' => 1,
+                            'pan_number_snapshot' => $pan->pan_number,
+                            'allotment_status' => 'pending',
+                            'allotted_shares' => 0,
+                        ]);
+                    }
+                }
+            }
+
             return back()->with('success', "PAN {$pan->masked_pan} saved successfully.");
         } catch (Exception $e) {
             return back()->with('error', $e->getMessage());
@@ -146,6 +165,54 @@ class UserPanController extends Controller
             'notes' => $validated['notes'] ?? null,
             'status' => $validated['status'],
         ]);
+
+        $newHolderName = $validated['account_holder_name'] ?? null;
+        $oldPanNumber = $old['pan_number'] ?? null;
+
+        // Synchronize all application batches linked to this PAN
+        $batchIds = \App\Models\ApplicationBatchPan::where('user_pan_id', $pan->id)->pluck('application_batch_id');
+
+        $batchQuery = \App\Models\ApplicationBatch::where(function ($q) use ($batchIds, $normalizedPan, $oldPanNumber) {
+            if ($batchIds->isNotEmpty()) {
+                $q->whereIn('id', $batchIds);
+            }
+            $q->orWhere('pan_number', $normalizedPan);
+            if (! empty($oldPanNumber)) {
+                $q->orWhere('pan_number', $oldPanNumber);
+            }
+        });
+
+        $batchUpdateData = ['pan_number' => $normalizedPan];
+        if (! empty($newHolderName)) {
+            $batchUpdateData['applicant_name'] = $newHolderName;
+        }
+
+        $matchingBatches = $batchQuery->get();
+        foreach ($matchingBatches as $matchingBatch) {
+            $matchingBatch->update($batchUpdateData);
+
+            // Ensure ApplicationBatchPan is synced/linked
+            $batchPan = $matchingBatch->batchPans()->where('user_pan_id', $pan->id)->first();
+            if ($batchPan) {
+                $batchPan->update(['pan_number_snapshot' => $normalizedPan]);
+            } else {
+                $firstBatchPan = $matchingBatch->batchPans()->first();
+                if ($firstBatchPan) {
+                    $firstBatchPan->update([
+                        'user_pan_id' => $pan->id,
+                        'pan_number_snapshot' => $normalizedPan,
+                    ]);
+                } else {
+                    $matchingBatch->batchPans()->create([
+                        'user_pan_id' => $pan->id,
+                        'sequence_number' => 1,
+                        'pan_number_snapshot' => $normalizedPan,
+                        'allotment_status' => 'pending',
+                        'allotted_shares' => 0,
+                    ]);
+                }
+            }
+        }
 
         AuditService::log(
             'pan_updated',

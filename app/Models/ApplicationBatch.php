@@ -120,6 +120,64 @@ class ApplicationBatch extends Model
         return (float) $value;
     }
 
+    public function getApplicantNameAttribute($value): ?string
+    {
+        // 1. If batch has batchPans loaded with userPan having account_holder_name, use that
+        if ($this->relationLoaded('batchPans') && $this->batchPans->isNotEmpty()) {
+            $panHolder = $this->batchPans->first()?->userPan?->account_holder_name;
+            if (! empty($panHolder)) {
+                return $panHolder;
+            }
+        }
+
+        // 2. If applicant_name is already set on the batch record, use it
+        if (! empty($value)) {
+            return $value;
+        }
+
+        // 3. Fallback to userPan matching pan_number
+        $panNum = $this->pan_number ?: ($this->relationLoaded('batchPans') ? $this->batchPans->first()?->pan_number_snapshot : null);
+        if (! empty($panNum)) {
+            $matched = UserPan::where('pan_number', strtoupper(trim($panNum)))->value('account_holder_name');
+            if (! empty($matched)) {
+                return $matched;
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * Get the resolved PAN holder name for exports and display.
+     */
+    public function getPanHolderName(): string
+    {
+        if ($this->relationLoaded('batchPans') && $this->batchPans->isNotEmpty()) {
+            $names = $this->batchPans->map(function ($p) {
+                return $p->userPan?->account_holder_name
+                    ?: UserPan::where('pan_number', $p->pan_number_snapshot)->value('account_holder_name');
+            })->filter()->unique();
+
+            if ($names->isNotEmpty()) {
+                return $names->join(', ');
+            }
+        }
+
+        $panNum = $this->pan_number ?: ($this->relationLoaded('batchPans') ? $this->batchPans->first()?->pan_number_snapshot : null);
+        if (! empty($panNum)) {
+            $matched = UserPan::where('pan_number', strtoupper(trim($panNum)))->value('account_holder_name');
+            if (! empty($matched)) {
+                return $matched;
+            }
+        }
+
+        if (! empty($this->applicant_name)) {
+            return $this->applicant_name;
+        }
+
+        return $this->user?->name ?: 'Applicant';
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class)->withTrashed();

@@ -193,11 +193,19 @@ class ApplicationBatchService
         ) {
             $batchNumber = self::generateBatchNumber();
 
+            $resolvedApplicantName = ! empty($data['applicant_name']) ? $data['applicant_name'] : null;
+            if (empty($resolvedApplicantName) && ! empty($panIds)) {
+                $resolvedApplicantName = UserPan::whereIn('id', $panIds)->whereNotNull('account_holder_name')->value('account_holder_name');
+            }
+            if (empty($resolvedApplicantName) && ! empty($data['pan_number'])) {
+                $resolvedApplicantName = UserPan::where('pan_number', strtoupper(trim($data['pan_number'])))->value('account_holder_name');
+            }
+
             $batch = ApplicationBatch::create([
                 'batch_number' => $batchNumber,
                 'ipo_id' => $ipo->id,
                 'user_id' => $userId,
-                'applicant_name' => $data['applicant_name'] ?? null,
+                'applicant_name' => $resolvedApplicantName,
                 'bank_name' => $data['bank_name'] ?? null,
                 'pan_number' => ! empty($data['pan_number']) ? strtoupper(trim($data['pan_number'])) : null,
                 'upi_id' => ! empty($data['upi_id']) ? strtolower(trim($data['upi_id'])) : null,
@@ -434,6 +442,16 @@ class ApplicationBatchService
 
         if (! empty($data['applicant_name'])) {
             $updateFields['applicant_name'] = $data['applicant_name'];
+        } elseif ($userPanId) {
+            $pan = UserPan::find($userPanId);
+            if (! empty($pan?->account_holder_name)) {
+                $updateFields['applicant_name'] = $pan->account_holder_name;
+            }
+        } elseif ($panNum) {
+            $matchedHolder = UserPan::where('pan_number', $panNum)->value('account_holder_name');
+            if (! empty($matchedHolder)) {
+                $updateFields['applicant_name'] = $matchedHolder;
+            }
         }
         if (! empty($data['bank_name'])) {
             $updateFields['bank_name'] = $data['bank_name'];

@@ -376,11 +376,16 @@ export default function ApplicationsIndex({
         setPanModalBatch(batch);
         const existingPan = batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot || '';
         setPanModalPanNumber(existingPan);
-        setPanModalApplicantName(batch.applicant_name || '');
+        const matched = userPans.find((p) => p.pan_number === existingPan);
+        setPanModalApplicantName(
+            batch.batch_pans?.[0]?.user_pan?.account_holder_name ||
+            matched?.account_holder_name ||
+            batch.applicant_name ||
+            ''
+        );
         setPanModalSearchQuery('');
         setPanModalDropdownOpen(false);
 
-        const matched = userPans.find((p) => p.pan_number === existingPan);
         if (matched) {
             setPanModalPanId(String(matched.id));
             setPanModalIsNewPan(false);
@@ -396,7 +401,7 @@ export default function ApplicationsIndex({
     const handleSelectModalSavedPan = (p: UserPan) => {
         setPanModalPanId(String(p.id));
         setPanModalPanNumber(p.pan_number);
-        if (p.account_holder_name && !panModalApplicantName) {
+        if (p.account_holder_name) {
             setPanModalApplicantName(p.account_holder_name);
         }
         setPanModalDropdownOpen(false);
@@ -855,7 +860,7 @@ export default function ApplicationsIndex({
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
-                                                            {batch.applicant_name || batch.user?.name || 'Applicant'}
+                                                            {batch.batch_pans?.[0]?.user_pan?.account_holder_name || batch.applicant_name || batch.user?.name || 'Applicant'}
                                                         </span>
                                                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                                             <span className="font-mono text-xs text-neutral-400">

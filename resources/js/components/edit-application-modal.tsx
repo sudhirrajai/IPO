@@ -84,12 +84,17 @@ export default function EditApplicationModal({
     useEffect(() => {
         if (!batch) return;
 
-        setApplicantName(batch.applicant_name || '');
         const currentPan = batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot || '';
         setPanNumber(currentPan);
 
         // Match with userPans
         const matchedPan = userPans.find((p) => p.pan_number?.toUpperCase() === currentPan.toUpperCase());
+        setApplicantName(
+            batch.batch_pans?.[0]?.user_pan?.account_holder_name ||
+            matchedPan?.account_holder_name ||
+            batch.applicant_name ||
+            ''
+        );
         if (matchedPan) {
             setSelectedPanId(String(matchedPan.id));
         } else if (batch.batch_pans?.[0]?.user_pan_id) {
