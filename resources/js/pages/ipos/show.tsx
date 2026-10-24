@@ -123,6 +123,10 @@ export default function IpoShow({
     const [adminAppsSubTab, setAdminAppsSubTab] = useState<'all' | 'grouped'>('all');
     const [expandedUserGroups, setExpandedUserGroups] = useState<Record<string, boolean>>({});
 
+    // Applications Rate Filters (User Rate & Trader Rate)
+    const [selectedUserRate, setSelectedUserRate] = useState<string>('all');
+    const [selectedTraderRate, setSelectedTraderRate] = useState<string>('all');
+
     // Applications Live Search with 5-second delay
     const [appsSearchInput, setAppsSearchInput] = useState('');
     const [appliedAppsSearch, setAppliedAppsSearch] = useState('');
@@ -130,6 +134,84 @@ export default function IpoShow({
 
     // Edit Application Modal state (Admin only)
     const [editingBatch, setEditingBatch] = useState<ApplicationBatch | null>(null);
+
+    // Deduplicate bank accounts by normalized name so HDFC is only listed once and labels don't repeat
+    const uniqueBanks = useMemo(() => {
+        const map = new Map<string, { bank_name: string; upis: UserUpi[] }>();
+        bankAccounts.forEach((b) => {
+            const trimmed = (b.bank_name || '').trim();
+            if (!trimmed) return;
+            const key = trimmed.toLowerCase();
+            if (!map.has(key)) {
+                map.set(key, {
+                    bank_name: trimmed,
+                    upis: b.upis ? [...b.upis] : [],
+                });
+            } else {
+                const existing = map.get(key)!;
+                (b.upis || []).forEach((u) => {
+                    if (!existing.upis.some((eu) => eu.upi_id === u.upi_id)) {
+                        existing.upis.push(u);
+                    }
+                });
+            }
+        });
+        return Array.from(map.values()).sort((a, b) => a.bank_name.localeCompare(b.bank_name));
+    }, [bankAccounts]);
+
+    // Available User Rates extracted dynamically from current application batches
+    const availableUserRates = useMemo(() => {
+        const rateMap = new Map<string, { label: string; value: string; count: number }>();
+        let fixCount = 0;
+        let pctCount = 0;
+
+        batches.forEach((b) => {
+            const rateVal = Number(b.published_rate_snapshot || 0);
+            if (rateVal > 0) {
+                const key = `user_rate:${rateVal}`;
+                const cur = rateMap.get(key) || { label: `User Rate: ₹${rateVal.toLocaleString('en-IN')}`, value: key, count: 0 };
+                cur.count += 1;
+                rateMap.set(key, cur);
+            }
+            if (b.profit_sharing_type === 'fix') {
+                fixCount += 1;
+            } else if (b.profit_sharing_type === 'percentage') {
+                pctCount += 1;
+            }
+        });
+
+        const list = Array.from(rateMap.values()).sort((a, b) => {
+            const valA = Number(a.value.replace('user_rate:', ''));
+            const valB = Number(b.value.replace('user_rate:', ''));
+            return valB - valA;
+        });
+
+        if (fixCount > 0) {
+            list.push({ label: `Fixed Payout (Fix)`, value: 'type:fix', count: fixCount });
+        }
+        if (pctCount > 0) {
+            list.push({ label: `Percentage Share (%)`, value: 'type:percentage', count: pctCount });
+        }
+
+        return list;
+    }, [batches]);
+
+    // Available Trader Rates extracted dynamically from current application batches
+    const availableTraderRates = useMemo(() => {
+        const rateMap = new Map<string, { label: string; value: string; count: number }>();
+
+        batches.forEach((b) => {
+            const rateVal = Number(b.trader_rate_snapshot || 0);
+            if (rateVal > 0) {
+                const key = String(rateVal);
+                const cur = rateMap.get(key) || { label: `Trader Rate: ₹${rateVal.toLocaleString('en-IN')}`, value: key, count: 0 };
+                cur.count += 1;
+                rateMap.set(key, cur);
+            }
+        });
+
+        return Array.from(rateMap.values()).sort((a, b) => Number(b.value) - Number(a.value));
+    }, [batches]);
 
     useEffect(() => {
         if (appsSearchInput === appliedAppsSearch) {
@@ -154,29 +236,57 @@ export default function IpoShow({
     }, [appsSearchInput, appliedAppsSearch]);
 
     const filteredBatches = useMemo(() => {
-        if (!appliedAppsSearch.trim()) return batches;
-        const q = appliedAppsSearch.toLowerCase().trim();
         return batches.filter((batch) => {
-            const pans = batch.batch_pans || [];
-            const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
-            const panHolder = pans[0]?.user_pan?.account_holder_name;
-            const applicant = (panHolder || batch.applicant_name || batch.user?.name || '').toLowerCase();
-            const batchNum = (batch.batch_number || '').toLowerCase();
-            const pan = panNumberRaw.toLowerCase();
-            const bank = (batch.bank_name || '').toLowerCase();
-            const upi = (batch.upi_id || '').toLowerCase();
-            const userEmail = (batch.user?.email || '').toLowerCase();
-            const notes = (batch.notes || '').toLowerCase();
+            // Text Search filter
+            if (appliedAppsSearch.trim()) {
+                const q = appliedAppsSearch.toLowerCase().trim();
+                const pans = batch.batch_pans || [];
+                const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
+                const panHolder = pans[0]?.user_pan?.account_holder_name;
+                const applicant = (panHolder || batch.applicant_name || batch.user?.name || '').toLowerCase();
+                const batchNum = (batch.batch_number || '').toLowerCase();
+                const pan = panNumberRaw.toLowerCase();
+                const bank = (batch.bank_name || '').toLowerCase();
+                const upi = (batch.upi_id || '').toLowerCase();
+                const userEmail = (batch.user?.email || '').toLowerCase();
+                const notes = (batch.notes || '').toLowerCase();
 
-            return applicant.includes(q) ||
-                batchNum.includes(q) ||
-                pan.includes(q) ||
-                bank.includes(q) ||
-                upi.includes(q) ||
-                userEmail.includes(q) ||
-                notes.includes(q);
+                const textMatch = applicant.includes(q) ||
+                    batchNum.includes(q) ||
+                    pan.includes(q) ||
+                    bank.includes(q) ||
+                    upi.includes(q) ||
+                    userEmail.includes(q) ||
+                    notes.includes(q);
+
+                if (!textMatch) return false;
+            }
+
+            // User Rate filter
+            if (selectedUserRate !== 'all') {
+                if (selectedUserRate.startsWith('user_rate:')) {
+                    const target = Number(selectedUserRate.replace('user_rate:', ''));
+                    if (Number(batch.published_rate_snapshot || 0) !== target) {
+                        return false;
+                    }
+                } else if (selectedUserRate === 'type:fix') {
+                    if (batch.profit_sharing_type !== 'fix') return false;
+                } else if (selectedUserRate === 'type:percentage') {
+                    if (batch.profit_sharing_type !== 'percentage') return false;
+                }
+            }
+
+            // Trader Rate filter (Admin only)
+            if (isAdmin && selectedTraderRate !== 'all') {
+                const target = Number(selectedTraderRate);
+                if (Number(batch.trader_rate_snapshot || 0) !== target) {
+                    return false;
+                }
+            }
+
+            return true;
         });
-    }, [batches, appliedAppsSearch]);
+    }, [batches, appliedAppsSearch, selectedUserRate, selectedTraderRate, isAdmin]);
 
     const toggleUserGroup = (userId: string) => {
         setExpandedUserGroups((prev) => ({
@@ -394,7 +504,7 @@ export default function IpoShow({
             pendingApprovalCount: number;
         }>();
 
-        batches.forEach((batch) => {
+        filteredBatches.forEach((batch) => {
             const uId = batch.user_id ? String(batch.user_id) : 'guest';
             const uName = batch.user?.name || batch.applicant_name || 'Guest / Direct';
             const uEmail = batch.user?.email || 'No email registered';
@@ -2105,42 +2215,100 @@ export default function IpoShow({
                                                 </span>
                                             )}
 
-                                            {/* Live Search for everyone (Auto-searches after 5s typing delay without enter) */}
-                                            <div className="relative flex-1 max-w-sm sm:ml-auto">
-                                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" />
-                                                <Input
-                                                    placeholder="Live search PAN, applicant, batch #, bank..."
-                                                    value={appsSearchInput}
-                                                    onChange={(e) => setAppsSearchInput(e.target.value)}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter') {
-                                                            e.preventDefault();
-                                                            setAppliedAppsSearch(appsSearchInput);
-                                                            setSearchCountdown(null);
-                                                        }
-                                                    }}
-                                                    className="pl-8 pr-28 h-9 text-xs"
-                                                />
-                                                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
-                                                    {searchCountdown !== null && searchCountdown > 0 && (
-                                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
-                                                            {searchCountdown}s
-                                                        </span>
-                                                    )}
-                                                    {appsSearchInput && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setAppsSearchInput('');
-                                                                setAppliedAppsSearch('');
+                                            {/* Live Search & Rate Filters */}
+                                            <div className="flex flex-wrap items-center gap-2 flex-1 sm:justify-end">
+                                                {/* User Rate Filter */}
+                                                <div className="w-[145px] sm:w-[160px]">
+                                                    <Select value={selectedUserRate} onValueChange={setSelectedUserRate}>
+                                                        <SelectTrigger className="h-9 text-xs bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800">
+                                                            <SelectValue placeholder="All User Rates" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="all">All User Rates</SelectItem>
+                                                            {availableUserRates.map((r) => (
+                                                                <SelectItem key={r.value} value={r.value}>
+                                                                    {r.label} ({r.count})
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
+                                                {/* Trader Rate Filter (Admin Only) */}
+                                                {isAdmin && (
+                                                    <div className="w-[150px] sm:w-[165px]">
+                                                        <Select value={selectedTraderRate} onValueChange={setSelectedTraderRate}>
+                                                            <SelectTrigger className="h-9 text-xs bg-white dark:bg-neutral-900 border-purple-200 dark:border-purple-900/60 text-purple-900 dark:text-purple-200">
+                                                                <SelectValue placeholder="All Trader Rates" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="all">All Trader Rates</SelectItem>
+                                                                {availableTraderRates.map((r) => (
+                                                                    <SelectItem key={r.value} value={r.value}>
+                                                                        {r.label} ({r.count})
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                )}
+
+                                                {/* Active Filter Reset */}
+                                                {(selectedUserRate !== 'all' || selectedTraderRate !== 'all' || appliedAppsSearch) && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setSelectedUserRate('all');
+                                                            setSelectedTraderRate('all');
+                                                            setAppsSearchInput('');
+                                                            setAppliedAppsSearch('');
+                                                        }}
+                                                        className="h-9 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 shrink-0"
+                                                        title="Reset active filters"
+                                                    >
+                                                        <X className="h-3.5 w-3.5 mr-1" />
+                                                        Reset
+                                                    </Button>
+                                                )}
+
+                                                {/* Live Search Input */}
+                                                <div className="relative min-w-[200px] flex-1 max-w-xs">
+                                                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" />
+                                                    <Input
+                                                        placeholder="Live search PAN, applicant, batch #, bank..."
+                                                        value={appsSearchInput}
+                                                        onChange={(e) => setAppsSearchInput(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.preventDefault();
+                                                                setAppliedAppsSearch(appsSearchInput);
                                                                 setSearchCountdown(null);
-                                                            }}
-                                                            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
-                                                            title="Clear search"
-                                                        >
-                                                            <X className="h-3.5 w-3.5" />
-                                                        </button>
-                                                    )}
+                                                            }
+                                                        }}
+                                                        className="pl-8 pr-16 h-9 text-xs"
+                                                    />
+                                                    <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                                                        {searchCountdown !== null && searchCountdown > 0 && (
+                                                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-semibold bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                                                                {searchCountdown}s
+                                                            </span>
+                                                        )}
+                                                        {appsSearchInput && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setAppsSearchInput('');
+                                                                    setAppliedAppsSearch('');
+                                                                    setSearchCountdown(null);
+                                                                }}
+                                                                className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+                                                                title="Clear search"
+                                                            >
+                                                                <X className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -2804,13 +2972,13 @@ export default function IpoShow({
                                                 <SelectValue placeholder="Select primary bank..." />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {bankAccounts.length === 0 ? (
+                                                {uniqueBanks.length === 0 ? (
                                                     <SelectItem value="none" disabled>
                                                         No saved banks
                                                     </SelectItem>
                                                 ) : (
-                                                    bankAccounts.map((b) => (
-                                                        <SelectItem key={b.id} value={b.bank_name}>
+                                                    uniqueBanks.map((b) => (
+                                                        <SelectItem key={b.bank_name} value={b.bank_name}>
                                                             {b.bank_name} {b.upis && b.upis.length > 0 ? `(${b.upis.length} UPI)` : ''}
                                                         </SelectItem>
                                                     ))
@@ -2915,13 +3083,13 @@ export default function IpoShow({
                                                 <SelectValue placeholder="Select or type bank..." />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {bankAccounts.length === 0 ? (
+                                                {uniqueBanks.length === 0 ? (
                                                     <SelectItem value="none" disabled>
                                                         No saved banks. Click 'New Bank' above.
                                                     </SelectItem>
                                                 ) : (
-                                                    bankAccounts.map((b) => (
-                                                        <SelectItem key={b.id} value={b.bank_name}>
+                                                    uniqueBanks.map((b) => (
+                                                        <SelectItem key={b.bank_name} value={b.bank_name}>
                                                             {b.bank_name} {b.upis && b.upis.length > 0 ? `(${b.upis.length} UPI)` : ''}
                                                         </SelectItem>
                                                     ))
@@ -2931,7 +3099,7 @@ export default function IpoShow({
 
                                         {/* Linked UPI Quick Pills for selected bank */}
                                         {(() => {
-                                            const currentBank = bankAccounts.find((b) => b.bank_name === bankName);
+                                            const currentBank = uniqueBanks.find((b) => b.bank_name.toLowerCase() === bankName.toLowerCase());
                                             if (currentBank?.upis && currentBank.upis.length > 0) {
                                                 return (
                                                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -3577,6 +3745,11 @@ export default function IpoShow({
                                                     <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                                                         {b.bank_name}
                                                     </span>
+                                                    {isAdmin && b.user && (
+                                                        <Badge variant="outline" className="text-[10px] text-neutral-500 font-normal">
+                                                            {b.user.name}
+                                                        </Badge>
+                                                    )}
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
                                                     <button

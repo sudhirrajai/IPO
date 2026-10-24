@@ -15,13 +15,19 @@ class BankAccountController extends Controller
             'account_holder_name' => 'nullable|string|max:100',
         ]);
 
-        $bank = BankAccount::firstOrCreate([
-            'user_id' => $request->user()->id,
-            'bank_name' => trim($validated['bank_name']),
-        ], [
-            'account_holder_name' => $validated['account_holder_name'] ?? null,
-            'status' => 'active',
-        ]);
+        $trimmedName = trim($validated['bank_name']);
+        $bank = BankAccount::where('user_id', $request->user()->id)
+            ->whereRaw('LOWER(TRIM(bank_name)) = ?', [strtolower($trimmedName)])
+            ->first();
+
+        if (! $bank) {
+            $bank = BankAccount::create([
+                'user_id' => $request->user()->id,
+                'bank_name' => $trimmedName,
+                'account_holder_name' => $validated['account_holder_name'] ?? null,
+                'status' => 'active',
+            ]);
+        }
 
         return back()->with('success', "Bank account '{$bank->bank_name}' saved successfully.");
     }

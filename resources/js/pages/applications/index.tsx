@@ -68,6 +68,8 @@ interface ApplicationsIndexProps {
     userPans?: UserPan[];
     bankAccounts?: BankAccount[];
     userUpis?: UserUpi[];
+    availableUserRates?: string[];
+    availableTraderRates?: string[];
     allotmentTodayCount?: number;
     filters: {
         ipo_id?: string;
@@ -75,6 +77,8 @@ interface ApplicationsIndexProps {
         funding_source?: string;
         application_status?: string;
         settlement_status?: string;
+        user_rate?: string;
+        trader_rate?: string;
         search?: string;
         allotment_today?: string;
     };
@@ -95,6 +99,8 @@ export default function ApplicationsIndex({
     userPans = [],
     bankAccounts = [],
     userUpis = [],
+    availableUserRates = [],
+    availableTraderRates = [],
     allotmentTodayCount = 0,
     filters,
     isAdmin,
@@ -104,6 +110,8 @@ export default function ApplicationsIndex({
     const [selectedFunding, setSelectedFunding] = useState(filters.funding_source || 'all');
     const [selectedStatus, setSelectedStatus] = useState(filters.application_status || 'all');
     const [selectedSettlement, setSelectedSettlement] = useState(filters.settlement_status || 'all');
+    const [selectedUserRate, setSelectedUserRate] = useState(filters.user_rate || 'all');
+    const [selectedTraderRate, setSelectedTraderRate] = useState(filters.trader_rate || 'all');
     const [searchInput, setSearchInput] = useState(filters.search || '');
     const [searchCountdown, setSearchCountdown] = useState<number | null>(null);
     const isAllotmentTodayFilter = filters.allotment_today === '1';
@@ -216,6 +224,8 @@ export default function ApplicationsIndex({
             funding_source: selectedFunding,
             application_status: selectedStatus,
             settlement_status: selectedSettlement,
+            user_rate: selectedUserRate,
+            trader_rate: selectedTraderRate,
             search: searchInput,
             allotment_today: isAllotmentTodayFilter ? '1' : '',
             [key]: value,
@@ -786,6 +796,75 @@ export default function ApplicationsIndex({
                             <SelectItem value="cancelled">Cancelled</SelectItem>
                         </SelectContent>
                     </Select>
+
+                    {/* User Rate Filter */}
+                    <Select
+                        value={selectedUserRate}
+                        onValueChange={(val) => {
+                            setSelectedUserRate(val);
+                            handleFilterChange('user_rate', val);
+                        }}
+                    >
+                        <SelectTrigger className="w-[145px] h-9 text-xs">
+                            <SelectValue placeholder="User Rate" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All User Rates</SelectItem>
+                            <SelectItem value="type:fix">Fixed Payout (Fix)</SelectItem>
+                            <SelectItem value="type:percentage">Percentage Share (%)</SelectItem>
+                            {availableUserRates.map((r) => (
+                                <SelectItem key={r} value={r}>
+                                    ₹{Number(r).toLocaleString('en-IN')} (User Rate)
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    {/* Trader Rate Filter (Admin Only) */}
+                    {isAdmin && (
+                        <Select
+                            value={selectedTraderRate}
+                            onValueChange={(val) => {
+                                setSelectedTraderRate(val);
+                                handleFilterChange('trader_rate', val);
+                            }}
+                        >
+                            <SelectTrigger className="w-[150px] h-9 text-xs border-purple-200 dark:border-purple-900/60 text-purple-900 dark:text-purple-200">
+                                <SelectValue placeholder="Trader Rate" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Trader Rates</SelectItem>
+                                {availableTraderRates.map((r) => (
+                                    <SelectItem key={r} value={r}>
+                                        ₹{Number(r).toLocaleString('en-IN')} (Trader Rate)
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    )}
+
+                    {(selectedIpo !== 'all' || selectedUser !== 'all' || selectedFunding !== 'all' || selectedStatus !== 'all' || selectedSettlement !== 'all' || selectedUserRate !== 'all' || selectedTraderRate !== 'all' || searchInput || isAllotmentTodayFilter) && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                                setSelectedIpo('all');
+                                setSelectedUser('all');
+                                setSelectedFunding('all');
+                                setSelectedStatus('all');
+                                setSelectedSettlement('all');
+                                setSelectedUserRate('all');
+                                setSelectedTraderRate('all');
+                                setSearchInput('');
+                                router.get('/applications', {}, { preserveState: true, replace: true });
+                            }}
+                            className="h-9 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                            title="Reset all filters"
+                        >
+                            <X className="h-3.5 w-3.5 mr-1" />
+                            Reset
+                        </Button>
+                    )}
                 </div>
 
                 {/* Applications Table */}

@@ -15,8 +15,9 @@ class IpoController extends Controller
 {
     public function index(Request $request): Response
     {
-        // Automatically ensure dynamic status alignment with current date
+        // Automatically ensure dynamic status alignment with current date and deduplicate records
         Ipo::recalculateStatuses();
+        Ipo::deduplicate();
 
         $user = $request->user();
         $userFavoritesCount = $user ? $user->favoriteIpos()->count() : 0;
@@ -178,13 +179,13 @@ class IpoController extends Controller
 
         // Saved Bank Accounts for quick selection with linked UPI IDs
         $bankAccounts = $isAdmin
-            ? \App\Models\BankAccount::where('status', 'active')->orderBy('bank_name')->get()
-            : \App\Models\BankAccount::where('user_id', $user->id)->where('status', 'active')->orderBy('bank_name')->get();
+            ? \App\Models\BankAccount::with(['user:id,name', 'upis'])->where('status', 'active')->orderBy('bank_name')->get()
+            : \App\Models\BankAccount::with('upis')->where('user_id', $user->id)->where('status', 'active')->orderBy('bank_name')->get();
 
         // All saved UPI IDs
         $userUpis = $isAdmin
-            ? \App\Models\UserUpi::where('status', 'active')->orderBy('upi_id')->get()
-            : \App\Models\UserUpi::where('user_id', $user->id)->where('status', 'active')->orderBy('upi_id')->get();
+            ? \App\Models\UserUpi::with('bankAccount')->where('status', 'active')->orderBy('upi_id')->get()
+            : \App\Models\UserUpi::with('bankAccount')->where('user_id', $user->id)->where('status', 'active')->orderBy('upi_id')->get();
 
         $isFavorite = $user ? $user->favoriteIpos()->where('ipo_id', $ipo->id)->exists() : false;
 

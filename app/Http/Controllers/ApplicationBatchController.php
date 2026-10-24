@@ -46,6 +46,20 @@ class ApplicationBatchController extends Controller
             $query->where('settlement_status', $request->settlement_status);
         }
 
+        if ($request->filled('user_rate') && $request->user_rate !== 'all') {
+            if ($request->user_rate === 'type:fix') {
+                $query->where('profit_sharing_type', 'fix');
+            } elseif ($request->user_rate === 'type:percentage') {
+                $query->where('profit_sharing_type', 'percentage');
+            } else {
+                $query->where('published_rate_snapshot', $request->user_rate);
+            }
+        }
+
+        if ($isAdmin && $request->filled('trader_rate') && $request->trader_rate !== 'all') {
+            $query->where('trader_rate_snapshot', $request->trader_rate);
+        }
+
         if ($request->filled('allotment_today') && $request->allotment_today === '1') {
             $query->whereHas('ipo', function ($q) use ($today) {
                 $q->whereDate('allotment_date', $today);
@@ -103,12 +117,35 @@ class ApplicationBatchController extends Controller
             : UserPan::where('user_id', $user->id)->where('status', 'active')->orderBy('account_holder_name')->get();
 
         $bankAccounts = $isAdmin
-            ? \App\Models\BankAccount::where('status', 'active')->orderBy('bank_name')->get()
-            : \App\Models\BankAccount::where('user_id', $user->id)->where('status', 'active')->orderBy('bank_name')->get();
+            ? \App\Models\BankAccount::with(['user:id,name', 'upis'])->where('status', 'active')->orderBy('bank_name')->get()
+            : \App\Models\BankAccount::with('upis')->where('user_id', $user->id)->where('status', 'active')->orderBy('bank_name')->get();
 
         $userUpis = $isAdmin
-            ? \App\Models\UserUpi::where('status', 'active')->orderBy('upi_id')->get()
-            : \App\Models\UserUpi::where('user_id', $user->id)->where('status', 'active')->orderBy('upi_id')->get();
+            ? \App\Models\UserUpi::with('bankAccount')->where('status', 'active')->orderBy('upi_id')->get()
+            : \App\Models\UserUpi::with('bankAccount')->where('user_id', $user->id)->where('status', 'active')->orderBy('upi_id')->get();
+
+        $userRatesQuery = ApplicationBatch::select('published_rate_snapshot')
+            ->where('published_rate_snapshot', '>', 0)
+            ->distinct();
+        if (! $isAdmin) {
+            $userRatesQuery->where('user_id', $user->id);
+        }
+        $availableUserRates = $userRatesQuery->orderByDesc('published_rate_snapshot')
+            ->pluck('published_rate_snapshot')
+            ->map(fn ($r) => (string) (float) $r)
+            ->values()
+            ->all();
+
+        $availableTraderRates = $isAdmin
+            ? ApplicationBatch::select('trader_rate_snapshot')
+                ->where('trader_rate_snapshot', '>', 0)
+                ->distinct()
+                ->orderByDesc('trader_rate_snapshot')
+                ->pluck('trader_rate_snapshot')
+                ->map(fn ($r) => (string) (float) $r)
+                ->values()
+                ->all()
+            : [];
 
         return Inertia::render('applications/index', [
             'batches' => $batches,
@@ -117,8 +154,10 @@ class ApplicationBatchController extends Controller
             'userPans' => $userPans,
             'bankAccounts' => $bankAccounts,
             'userUpis' => $userUpis,
+            'availableUserRates' => $availableUserRates,
+            'availableTraderRates' => $availableTraderRates,
             'allotmentTodayCount' => $allotmentTodayCount,
-            'filters' => $request->only(['ipo_id', 'user_id', 'funding_source', 'application_status', 'settlement_status', 'search', 'allotment_today', 'per_page']),
+            'filters' => $request->only(['ipo_id', 'user_id', 'funding_source', 'application_status', 'settlement_status', 'search', 'allotment_today', 'per_page', 'user_rate', 'trader_rate']),
             'isAdmin' => $isAdmin,
         ]);
     }

@@ -271,6 +271,169 @@ class Ipo extends Model
         return $updated;
     }
 
+    public static function normalizeName(string $name): string
+    {
+        $clean = strtolower(trim($name));
+
+        $aliases = [
+            'reliance jio' => 'reliancejio',
+            'jio platforms' => 'reliancejio',
+            'jioplatforms' => 'reliancejio',
+            'reliance' => 'reliancejio',
+            'acevector' => 'snapdeal',
+            'snapdeal' => 'snapdeal',
+            'boat' => 'boatlifestyle',
+            'imagine marketing' => 'boatlifestyle',
+            'imaginemarketing' => 'boatlifestyle',
+        ];
+
+        foreach ($aliases as $needle => $canonical) {
+            if (str_contains($clean, $needle)) {
+                return $canonical;
+            }
+        }
+
+        $clean = preg_replace('/\b(ipo|limited|ltd|pvt|private|technologies|technology|tech|solutions|solution|industries|industry|services|service|enterprises|enterprise|corp|corporation|holdings|holding|india)\b/i', '', $clean);
+        $clean = preg_replace('/[^a-z0-9]/i', '', $clean);
+
+        return trim($clean);
+    }
+
+    /**
+     * Consolidate duplicate IPO records in the database, transferring batches, rates, and favorites to canonical records.
+     */
+    public static function deduplicate(): int
+    {
+        $ipos = self::with(['applicationBatches', 'rates'])->get();
+        if ($ipos->count() <= 1) {
+            return 0;
+        }
+
+        $groups = [];
+        foreach ($ipos as $ipo) {
+            $normKey = self::normalizeName($ipo->company_name);
+            $symKey = ! empty($ipo->symbol) && strlen(trim($ipo->symbol)) >= 3 ? 'SYM_' . strtoupper(trim($ipo->symbol)) : null;
+
+            // Find existing group by normKey or symKey
+            $matchedKey = null;
+            foreach ($groups as $gKey => $groupIpos) {
+                if ($gKey === $normKey) {
+                    $matchedKey = $gKey;
+                    break;
+                }
+                foreach ($groupIpos as $existing) {
+                    if (self::normalizeName($existing->company_name) === $normKey) {
+                        $matchedKey = $gKey;
+                        break 2;
+                    }
+                    if ($symKey && ! empty($existing->symbol) && strtoupper(trim($existing->symbol)) === strtoupper(trim($ipo->symbol))) {
+                        $matchedKey = $gKey;
+                        break 2;
+                    }
+                }
+            }
+
+            $keyToUse = $matchedKey ?: $normKey;
+            $groups[$keyToUse][] = $ipo;
+        }
+
+        $deletedCount = 0;
+
+        foreach ($groups as $group) {
+            if (count($group) <= 1) {
+                continue;
+            }
+
+            // Pick canonical keeper
+            usort($group, function ($a, $b) {
+                $aBatches = $a->applicationBatches->count();
+                $bBatches = $b->applicationBatches->count();
+                if ($aBatches !== $bBatches) {
+                    return $bBatches <=> $aBatches; // Higher batches first
+                }
+
+                $aRates = $a->rates->count();
+                $bRates = $b->rates->count();
+                if ($aRates !== $bRates) {
+                    return $bRates <=> $aRates; // Higher rates first
+                }
+
+                $aGmp = (float) ($a->gmp ?? 0);
+                $bGmp = (float) ($b->gmp ?? 0);
+                if ($aGmp !== $bGmp) {
+                    return $bGmp <=> $aGmp;
+                }
+
+                $aDates = ($a->open_date ? 1 : 0) + ($a->close_date ? 1 : 0);
+                $bDates = ($b->open_date ? 1 : 0) + ($b->close_date ? 1 : 0);
+                if ($aDates !== $bDates) {
+                    return $bDates <=> $aDates;
+                }
+
+                return $a->id <=> $b->id; // Earlier ID first
+            });
+
+            $keeper = array_shift($group);
+
+            foreach ($group as $duplicate) {
+                // 1. Reassign application batches
+                \App\Models\ApplicationBatch::where('ipo_id', $duplicate->id)->update(['ipo_id' => $keeper->id]);
+
+                // 2. Reassign IPO rates (only if keeper doesn't already have identical rates)
+                foreach ($duplicate->rates as $dupRate) {
+                    $alreadyHasRate = \App\Models\IpoRate::where('ipo_id', $keeper->id)
+                        ->where('trader_rate', $dupRate->trader_rate)
+                        ->where('published_rate', $dupRate->published_rate)
+                        ->exists();
+
+                    if (! $alreadyHasRate) {
+                        $dupRate->update(['ipo_id' => $keeper->id]);
+                    } else {
+                        $dupRate->delete();
+                    }
+                }
+
+                // 3. Transfer favorites
+                $favUserIds = \Illuminate\Support\Facades\DB::table('user_favorite_ipos')
+                    ->where('ipo_id', $duplicate->id)
+                    ->pluck('user_id');
+
+                foreach ($favUserIds as $uId) {
+                    \Illuminate\Support\Facades\DB::table('user_favorite_ipos')->updateOrInsert(
+                        ['user_id' => $uId, 'ipo_id' => $keeper->id],
+                        ['created_at' => now(), 'updated_at' => now()]
+                    );
+                }
+                \Illuminate\Support\Facades\DB::table('user_favorite_ipos')->where('ipo_id', $duplicate->id)->delete();
+
+                // 4. Fill missing fields on keeper from duplicate
+                $fields = [
+                    'symbol', 'exchange', 'category', 'open_date', 'close_date',
+                    'allotment_date', 'listing_date', 'price_band_min', 'price_band_max',
+                    'issue_price', 'lot_size', 'issue_size', 'gmp', 'kfin_client_id',
+                    'raw_provider_data',
+                ];
+
+                $modified = false;
+                foreach ($fields as $field) {
+                    if (empty($keeper->{$field}) && ! empty($duplicate->{$field})) {
+                        $keeper->{$field} = $duplicate->{$field};
+                        $modified = true;
+                    }
+                }
+
+                if ($modified) {
+                    $keeper->save();
+                }
+
+                $duplicate->delete();
+                $deletedCount++;
+            }
+        }
+
+        return $deletedCount;
+    }
+
     public function scopeOpen(Builder $query): Builder
     {
         return $query->where('status', 'open');

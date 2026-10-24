@@ -557,8 +557,6 @@ class GmpScraperService
      */
     public function normalizeName(string $name): string
     {
-        $name = preg_replace('/\b(ipo|limited|ltd|pvt|private|technologies|solutions|industries|india)\b/i', '', $name);
-        $name = preg_replace('/[^a-z0-9]/i', '', strtolower($name));
-        return trim($name);
+        return Ipo::normalizeName($name);
     }
 }
