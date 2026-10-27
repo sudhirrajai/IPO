@@ -263,6 +263,75 @@ class NseAllotmentService
     }
 
     /**
+     * Resolve the active NSE symbol for an IPO.
+     */
+    public static function resolveSymbol(Ipo $ipo): ?string
+    {
+        $activeSymbols = self::getActiveSymbols();
+        $ipoSymbol = strtoupper(trim($ipo->symbol ?? ''));
+
+        // 1. Direct match with active NSE symbols
+        if (! empty($ipoSymbol) && in_array($ipoSymbol, $activeSymbols, true)) {
+            return $ipoSymbol;
+        }
+
+        // 2. Check matched BSE symbol for this IPO
+        // BSE and NSE almost always share identical trading symbols (e.g. "JPL" for Jio Platforms)
+        $candidateBseSymbol = null;
+        try {
+            $ipos = BseAllotmentService::getActiveIpos();
+            $imId = BseAllotmentService::resolveImId($ipo);
+            if ($imId && ! empty($ipos)) {
+                foreach ($ipos as $bseItem) {
+                    if ((string) ($bseItem['IM_ID'] ?? '') === (string) $imId) {
+                        $bseSymbol = strtoupper(trim($bseItem['IPOSymbol'] ?? ''));
+                        if (! empty($bseSymbol) && in_array($bseSymbol, $activeSymbols, true)) {
+                            return $bseSymbol;
+                        }
+                        if (! empty($bseSymbol)) {
+                            $candidateBseSymbol = $bseSymbol;
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Error resolving BSE symbol for NSE: ' . $e->getMessage());
+        }
+
+        // 3. Keyword / token matching against active NSE symbols
+        $name = strtolower(trim($ipo->company_name ?? ''));
+        $tokens = KfintechAllotmentService::extractKeywords($ipo->company_name ?? '');
+
+        // Generate acronym/initials (e.g. "Jio Platforms Limited" -> "jpl")
+        $words = preg_split('/\s+/', (string) preg_replace('/[^a-zA-Z0-9\s]/', '', $name));
+        $acronym = '';
+        foreach ($words as $w) {
+            if (! in_array(strtolower($w), ['limited', 'ltd', 'india', 'pvt', 'private', 'ipo'])) {
+                $acronym .= strtolower($w[0] ?? '');
+            }
+        }
+
+        foreach ($activeSymbols as $sym) {
+            $symLower = strtolower($sym);
+            if (! empty($acronym) && $symLower === $acronym) {
+                return $sym;
+            }
+            foreach ($tokens as $token) {
+                if ($symLower === $token || str_contains($symLower, $token) || str_contains($token, $symLower)) {
+                    return $sym;
+                }
+            }
+        }
+
+        if (! empty($candidateBseSymbol)) {
+            return $candidateBseSymbol;
+        }
+
+        return ! empty($ipoSymbol) ? $ipoSymbol : null;
+    }
+
+    /**
      * Check allotment on NSE for a specific ApplicationBatch and update database.
      */
     public static function checkBatchAllotment(ApplicationBatch $batch): array
@@ -276,7 +345,7 @@ class NseAllotmentService
             ];
         }
 
-        $symbol = $ipo->symbol;
+        $symbol = self::resolveSymbol($ipo) ?? $ipo->symbol;
         if (empty($symbol)) {
             return [
                 'success' => false,
@@ -301,6 +370,15 @@ class NseAllotmentService
         }
 
         $result = self::queryAllotment($symbol, $pan);
+
+        // Fallback: If resolved symbol returned not_found and differ from original $ipo->symbol, try original
+        if ($result['success'] && ! $result['found'] && ! empty($ipo->symbol) && strtoupper($ipo->symbol) !== strtoupper($symbol)) {
+            $fallbackResult = self::queryAllotment($ipo->symbol, $pan);
+            if ($fallbackResult['success'] && $fallbackResult['found']) {
+                $result = $fallbackResult;
+                $symbol = strtoupper($ipo->symbol);
+            }
+        }
 
         if ($result['success'] && $result['found']) {
             $updateData = [

@@ -536,6 +536,7 @@ class ApplicationBatchService
     {
         $ipo = $batch->ipo;
         $registrar = strtolower((string) ($ipo?->registrar ?? ''));
+        $kfinResult = null;
 
         // 1. Check KFintech first if IPO matches KFintech active listings (Instant REST API, no captcha)
         if ($ipo) {
@@ -545,20 +546,33 @@ class ApplicationBatchService
 
             if ($kfinMatch) {
                 $kfinResult = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
-                if ($kfinResult['success'] && ($kfinResult['found'] ?? false)) {
+                if ($kfinResult['success'] && ($kfinResult['found'] ?? false) && ($kfinResult['allotted'] ?? false)) {
                     return $kfinResult;
                 }
             }
         }
 
-        // 2. Check BSE India (Instant REST API)
+        // 2. Check BSE India (Instant REST API / headless runner)
         $bseResult = \App\Services\BseAllotmentService::checkBatchAllotment($batch);
-        if ($bseResult['success'] && ($bseResult['found'] ?? false)) {
+        if ($bseResult['success'] && ($bseResult['found'] ?? false) && ($bseResult['allotted'] ?? false)) {
             return $bseResult;
         }
 
         // 3. Check NSE India (Headless scraper with captcha bypass)
         $nseResult = \App\Services\NseAllotmentService::checkBatchAllotment($batch);
+        if ($nseResult['success'] && ($nseResult['found'] ?? false) && ($nseResult['allotted'] ?? false)) {
+            return $nseResult;
+        }
+
+        // 4. If none were allotted (allotted: true), return the provider that found the application record (even with 0 shares)
+        if ($kfinResult && ($kfinResult['success'] ?? false) && ($kfinResult['found'] ?? false)) {
+            return $kfinResult;
+        }
+
+        if ($bseResult['success'] && ($bseResult['found'] ?? false)) {
+            return $bseResult;
+        }
+
         if ($nseResult['success'] && ($nseResult['found'] ?? false)) {
             return $nseResult;
         }

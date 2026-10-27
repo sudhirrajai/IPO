@@ -70,8 +70,24 @@ async function queryNse(symbol, pan) {
 
         await page.waitForSelector('#ipo_bid_symbol', { timeout: 10000 });
 
-        // Select symbol and type pan
-        await page.select('#ipo_bid_symbol', symbol.toUpperCase().trim());
+        // Select symbol with flexible option matching
+        const selectedValue = await page.evaluate((targetSymbol) => {
+            const select = document.querySelector('#ipo_bid_symbol');
+            if (!select) return targetSymbol;
+            const options = Array.from(select.options);
+            const target = targetSymbol.toUpperCase().trim();
+            // 1. Direct value or text match
+            let found = options.find(o => o.value.trim().toUpperCase() === target || o.text.trim().toUpperCase() === target);
+            if (found) return found.value;
+            // 2. Substring match
+            found = options.find(o => o.value.toUpperCase().includes(target) || o.text.toUpperCase().includes(target));
+            if (found) return found.value;
+            return target;
+        }, symbol);
+
+        if (selectedValue) {
+            await page.select('#ipo_bid_symbol', selectedValue);
+        }
         await page.type('#pan_no', pan.toUpperCase().trim());
 
         const responsePromise = page.waitForResponse(response => 

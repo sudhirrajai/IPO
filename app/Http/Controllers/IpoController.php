@@ -325,11 +325,11 @@ class IpoController extends Controller
 
     public function checkAllotments(Request $request, Ipo $ipo): RedirectResponse
     {
-        $provider = strtolower((string) $request->input('provider', 'kfintech'));
+        $provider = strtolower((string) $request->input('provider', 'auto'));
 
-        // Query pending batches for this IPO
+        // Query batches for this IPO (exclude cancelled)
         $batchesQuery = $ipo->applicationBatches()
-            ->whereIn('application_status', ['ready', 'submitted', 'confirmed', 'pending_allotment', 'pending_approval']);
+            ->whereNotIn('application_status', ['cancelled']);
 
         $count = $batchesQuery->count();
 

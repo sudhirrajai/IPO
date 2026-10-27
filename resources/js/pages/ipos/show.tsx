@@ -126,6 +126,9 @@ export default function IpoShow({
     // Applications Rate Filters (User Rate & Trader Rate)
     const [selectedUserRate, setSelectedUserRate] = useState<string>('all');
     const [selectedTraderRate, setSelectedTraderRate] = useState<string>('all');
+    const [selectedAllotmentFilter, setSelectedAllotmentFilter] = useState<'all' | 'allotted' | 'not_allotted' | 'pending'>('all');
+    const [checkedBatchIds, setCheckedBatchIds] = useState<Record<number, { allotted: boolean; details: any }>>({});
+    const [checkingBatchIds, setCheckingBatchIds] = useState<Record<number, boolean>>({});
 
     // Applications Live Search with 5-second delay
     const [appsSearchInput, setAppsSearchInput] = useState('');
@@ -235,8 +238,64 @@ export default function IpoShow({
         };
     }, [appsSearchInput, appliedAppsSearch]);
 
+    // Allotment Summary Statistics for this IPO
+    const allotmentStats = useMemo(() => {
+        let allottedCount = 0;
+        let notAllottedCount = 0;
+        let pendingCount = 0;
+        let totalAllottedShares = 0;
+
+        batches.forEach((b) => {
+            const details = b.allotment_details;
+            const locallyChecked = checkedBatchIds[b.id];
+            const hasAutoCheckResult = Boolean(
+                details ||
+                b.allotment_checked_at ||
+                locallyChecked
+            );
+            const isAllotted = b.application_status === 'allotted' || (hasAutoCheckResult && (details?.allotted || locallyChecked?.allotted));
+            const isNotAllotted = b.application_status === 'not_allotted' || (hasAutoCheckResult && (!details?.allotted && !locallyChecked?.allotted));
+
+            if (isAllotted) {
+                allottedCount += 1;
+                const shares = Number(details?.allotted_shares || 0);
+                totalAllottedShares += shares > 0 ? shares : (Number(b.application_count || 1) * Number(ipo.lot_size || 1));
+            } else if (isNotAllotted) {
+                notAllottedCount += 1;
+            } else {
+                pendingCount += 1;
+            }
+        });
+
+        return {
+            total: batches.length,
+            allotted: allottedCount,
+            notAllotted: notAllottedCount,
+            pending: pendingCount,
+            allottedShares: totalAllottedShares,
+        };
+    }, [batches, checkedBatchIds, ipo.lot_size]);
+
     const filteredBatches = useMemo(() => {
         return batches.filter((batch) => {
+            // Allotment Status filter
+            if (selectedAllotmentFilter !== 'all') {
+                const details = batch.allotment_details;
+                const locallyChecked = checkedBatchIds[batch.id];
+                const hasAutoCheckResult = Boolean(
+                    details ||
+                    batch.allotment_checked_at ||
+                    locallyChecked
+                );
+                const isAllotted = batch.application_status === 'allotted' || (hasAutoCheckResult && (details?.allotted || locallyChecked?.allotted));
+                const isNotAllotted = batch.application_status === 'not_allotted' || (hasAutoCheckResult && (!details?.allotted && !locallyChecked?.allotted));
+                const isPending = !isAllotted && !isNotAllotted;
+
+                if (selectedAllotmentFilter === 'allotted' && !isAllotted) return false;
+                if (selectedAllotmentFilter === 'not_allotted' && !isNotAllotted) return false;
+                if (selectedAllotmentFilter === 'pending' && !isPending) return false;
+            }
+
             // Text Search filter
             if (appliedAppsSearch.trim()) {
                 const q = appliedAppsSearch.toLowerCase().trim();
@@ -286,7 +345,7 @@ export default function IpoShow({
 
             return true;
         });
-    }, [batches, appliedAppsSearch, selectedUserRate, selectedTraderRate, isAdmin]);
+    }, [batches, appliedAppsSearch, selectedUserRate, selectedTraderRate, selectedAllotmentFilter, checkedBatchIds, isAdmin]);
 
     const toggleUserGroup = (userId: string) => {
         setExpandedUserGroups((prev) => ({
@@ -464,8 +523,6 @@ export default function IpoShow({
     const [allotmentResult, setAllotmentResult] = useState<AllotmentResultData | null>(null);
     const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
     const [isCheckingAllAllotments, setIsCheckingAllAllotments] = useState(false);
-    const [checkedBatchIds, setCheckedBatchIds] = useState<Record<number, { allotted: boolean; details: any }>>({});
-    const [checkingBatchIds, setCheckingBatchIds] = useState<Record<number, boolean>>({});
 
     // Live background polling when any batch in this IPO is checking in background
     useEffect(() => {
@@ -634,10 +691,10 @@ export default function IpoShow({
         }
     };
 
-    const handleCheckAllAllotments = () => {
+    const handleCheckAllAllotments = (provider: string = 'auto') => {
         setIsCheckingAllAllotments(true);
         router.post(`/ipos/${ipo.id}/check-allotments`, {
-            provider: 'kfintech',
+            provider,
         }, {
             preserveScroll: true,
             onFinish: () => setIsCheckingAllAllotments(false),
@@ -1030,13 +1087,13 @@ export default function IpoShow({
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={handleCheckAllAllotments}
+                                        onClick={() => handleCheckAllAllotments('auto')}
                                         disabled={isCheckingAllAllotments}
                                         className="border-sky-300 text-sky-700 bg-sky-50/80 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 text-xs h-9"
-                                        title="Check and scrape all application PANs against KFintech portal"
+                                        title="Auto-check all application PANs against BSE & NSE allotment portals"
                                     >
                                         <RefreshCw className={`mr-1.5 h-3.5 w-3.5 text-sky-600 ${isCheckingAllAllotments ? 'animate-spin' : ''}`} />
-                                        {isCheckingAllAllotments ? 'Checking...' : 'Check All KFintech'}
+                                        {isCheckingAllAllotments ? 'Checking...' : 'Check All Allotments'}
                                     </Button>
                                 )}
 
@@ -1096,14 +1153,14 @@ export default function IpoShow({
                                         </Badge>
                                     </h3>
                                     <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                                        Registrar allotment status is scheduled for today. Run KFintech scraper to verify allotment across all applications.
+                                        Registrar and exchange allotment status is scheduled for today. Check BSE & NSE to verify allotments.
                                     </p>
                                 </div>
                             </div>
                             {isAdmin && (
                                 <Button
                                     size="sm"
-                                    onClick={handleCheckAllAllotments}
+                                    onClick={() => handleCheckAllAllotments('auto')}
                                     disabled={isCheckingAllAllotments}
                                     className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-sm shrink-0"
                                 >
@@ -2195,71 +2252,171 @@ export default function IpoShow({
                                     </div>
                                 ) : (
                                     <>
-                                        {/* Toolbar: Admin Sub-Tabs & Live Search with 5s delay */}
-                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-3 mb-4">
-                                            {/* Admin Sub-Tabs */}
-                                            {isAdmin ? (
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setAdminAppsSubTab('all')}
-                                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                                                            adminAppsSubTab === 'all'
-                                                                ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs'
-                                                                : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200/80 dark:bg-neutral-800 dark:text-neutral-300'
-                                                        }`}
-                                                    >
-                                                        <FileText className="h-3.5 w-3.5" />
-                                                        All ({filteredBatches.length}{appliedAppsSearch ? `/${batches.length}` : ''})
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setAdminAppsSubTab('grouped')}
-                                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                                                            adminAppsSubTab === 'grouped'
-                                                                ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs'
-                                                                : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200/80 dark:bg-neutral-800 dark:text-neutral-300'
-                                                        }`}
-                                                    >
-                                                        <Users className="h-3.5 w-3.5" />
-                                                        Grouped ({groupedByUser.length})
-                                                    </button>
+                                        {/* Allotment Status Filters & Summary Banner */}
+                                        <div className="flex flex-col gap-3 mb-4">
+                                            {/* Allotment Metric Header Bar when allotments exist */}
+                                            {allotmentStats.allotted > 0 && (
+                                                <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shadow-xs">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-xs">
+                                                            <CheckCircle2 className="h-4 w-4" />
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                                                                {allotmentStats.allotted} Application{allotmentStats.allotted === 1 ? '' : 's'} Allotted!
+                                                            </span>
+                                                            <span className="text-[11px] text-emerald-700 dark:text-emerald-400 ml-2 font-medium">
+                                                                ({allotmentStats.allottedShares.toLocaleString('en-IN')} shares total) • {allotmentStats.notAllotted} Not Allotted
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold bg-emerald-100/80 dark:bg-emerald-900/60 px-2.5 py-1 rounded-full border border-emerald-300/60 dark:border-emerald-700/60">
+                                                            Allotment Rate: {allotmentStats.total > 0 ? ((allotmentStats.allotted / allotmentStats.total) * 100).toFixed(1) : 0}%
+                                                        </span>
+                                                    </div>
                                                 </div>
-                                            ) : (
-                                                <span className="text-xs text-neutral-500 font-medium">
-                                                    Showing {filteredBatches.length} of {batches.length} application(s)
-                                                </span>
                                             )}
 
-                                            {/* Live Search & Rate Filters */}
-                                            <div className="flex flex-wrap items-center gap-2 flex-1 sm:justify-end">
-                                                {/* User Rate Filter */}
-                                                <div className="w-[145px] sm:w-[160px]">
-                                                    <Select value={selectedUserRate} onValueChange={setSelectedUserRate}>
-                                                        <SelectTrigger className="h-9 text-xs bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800">
-                                                            <SelectValue placeholder="All User Rates" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="all">All User Rates</SelectItem>
-                                                            {availableUserRates.map((r) => (
-                                                                <SelectItem key={r.value} value={r.value}>
-                                                                    {r.label} ({r.count})
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-neutral-200 dark:border-neutral-800 pb-3">
+                                                {/* Left: View Mode (All / Grouped) and Allotment Filter Pills */}
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    {isAdmin && (
+                                                        <div className="flex items-center gap-1.5 p-0.5 bg-neutral-100 dark:bg-neutral-800/80 rounded-lg border border-neutral-200/80 dark:border-neutral-700/60">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setAdminAppsSubTab('all')}
+                                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                                                                    adminAppsSubTab === 'all'
+                                                                        ? 'bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100 shadow-xs'
+                                                                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200'
+                                                                }`}
+                                                            >
+                                                                <FileText className="h-3 w-3" />
+                                                                List
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setAdminAppsSubTab('grouped')}
+                                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                                                                    adminAppsSubTab === 'grouped'
+                                                                        ? 'bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100 shadow-xs'
+                                                                        : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200'
+                                                                }`}
+                                                            >
+                                                                <Users className="h-3 w-3" />
+                                                                Grouped ({groupedByUser.length})
+                                                            </button>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Quick Allotment Status Filter Tabs */}
+                                                    <div className="flex flex-wrap items-center gap-1 p-0.5 bg-neutral-100 dark:bg-neutral-800/80 rounded-lg border border-neutral-200/80 dark:border-neutral-700/60">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelectedAllotmentFilter('all')}
+                                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                                                                selectedAllotmentFilter === 'all'
+                                                                    ? 'bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100 shadow-xs'
+                                                                    : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200'
+                                                            }`}
+                                                        >
+                                                            <span>All</span>
+                                                            <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300">
+                                                                {allotmentStats.total}
+                                                            </span>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelectedAllotmentFilter('allotted')}
+                                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                                                                selectedAllotmentFilter === 'allotted'
+                                                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                                                    : 'text-emerald-700 hover:bg-emerald-50/80 dark:text-emerald-400 dark:hover:bg-emerald-950/40'
+                                                            }`}
+                                                        >
+                                                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                                                            <span>Allotted</span>
+                                                            <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                                                                selectedAllotmentFilter === 'allotted'
+                                                                    ? 'bg-emerald-700 text-emerald-100'
+                                                                    : 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300'
+                                                            }`}>
+                                                                {allotmentStats.allotted}
+                                                            </span>
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelectedAllotmentFilter('not_allotted')}
+                                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                                                                selectedAllotmentFilter === 'not_allotted'
+                                                                    ? 'bg-rose-600 text-white shadow-xs'
+                                                                    : 'text-rose-700 hover:bg-rose-50/80 dark:text-rose-400 dark:hover:bg-rose-950/40'
+                                                            }`}
+                                                        >
+                                                            <X className="h-3 w-3 text-rose-500" />
+                                                            <span>Not Allotted</span>
+                                                            <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                                                                selectedAllotmentFilter === 'not_allotted'
+                                                                    ? 'bg-rose-700 text-rose-100'
+                                                                    : 'bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-300'
+                                                            }`}>
+                                                                {allotmentStats.notAllotted}
+                                                            </span>
+                                                        </button>
+
+                                                        {allotmentStats.pending > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setSelectedAllotmentFilter('pending')}
+                                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                                                                    selectedAllotmentFilter === 'pending'
+                                                                        ? 'bg-amber-600 text-white shadow-xs'
+                                                                        : 'text-amber-700 hover:bg-amber-50/80 dark:text-amber-400 dark:hover:bg-amber-950/40'
+                                                                }`}
+                                                            >
+                                                                <Clock className="h-3 w-3 text-amber-500" />
+                                                                <span>Pending</span>
+                                                                <span className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                                                                    selectedAllotmentFilter === 'pending'
+                                                                        ? 'bg-amber-700 text-amber-100'
+                                                                        : 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300'
+                                                                }`}>
+                                                                    {allotmentStats.pending}
+                                                                </span>
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
 
-                                                {/* Trader Rate Filter (Admin Only) */}
-                                                {isAdmin && (
-                                                    <div className="w-[150px] sm:w-[165px]">
-                                                        <Select value={selectedTraderRate} onValueChange={setSelectedTraderRate}>
-                                                            <SelectTrigger className="h-9 text-xs bg-white dark:bg-neutral-900 border-purple-200 dark:border-purple-900/60 text-purple-900 dark:text-purple-200">
-                                                                <SelectValue placeholder="All Trader Rates" />
+                                                {/* Right: Toolbar controls (Search, Rates, Bulk Check, Reset) */}
+                                                <div className="flex flex-wrap items-center gap-2 flex-1 lg:justify-end">
+                                                    {/* Quick Bulk Check Allotments in toolbar */}
+                                                    {isAdmin && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => handleCheckAllAllotments('auto')}
+                                                            disabled={isCheckingAllAllotments}
+                                                            className="h-9 px-2.5 text-xs border-sky-300 text-sky-700 bg-sky-50/80 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300"
+                                                            title="Check all applications against BSE & NSE allotment portals"
+                                                        >
+                                                            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 text-sky-600 ${isCheckingAllAllotments ? 'animate-spin' : ''}`} />
+                                                            {isCheckingAllAllotments ? 'Checking...' : 'Check All (BSE/NSE)'}
+                                                        </Button>
+                                                    )}
+
+                                                    {/* User Rate Filter */}
+                                                    <div className="w-[140px] sm:w-[155px]">
+                                                        <Select value={selectedUserRate} onValueChange={setSelectedUserRate}>
+                                                            <SelectTrigger className="h-9 text-xs bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800">
+                                                                <SelectValue placeholder="All User Rates" />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="all">All Trader Rates</SelectItem>
-                                                                {availableTraderRates.map((r) => (
+                                                                <SelectItem value="all">All User Rates</SelectItem>
+                                                                {availableUserRates.map((r) => (
                                                                     <SelectItem key={r.value} value={r.value}>
                                                                         {r.label} ({r.count})
                                                                     </SelectItem>
@@ -2267,26 +2424,45 @@ export default function IpoShow({
                                                             </SelectContent>
                                                         </Select>
                                                     </div>
-                                                )}
 
-                                                {/* Active Filter Reset */}
-                                                {(selectedUserRate !== 'all' || selectedTraderRate !== 'all' || appliedAppsSearch) && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => {
-                                                            setSelectedUserRate('all');
-                                                            setSelectedTraderRate('all');
-                                                            setAppsSearchInput('');
-                                                            setAppliedAppsSearch('');
-                                                        }}
-                                                        className="h-9 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 shrink-0"
-                                                        title="Reset active filters"
-                                                    >
-                                                        <X className="h-3.5 w-3.5 mr-1" />
-                                                        Reset
-                                                    </Button>
-                                                )}
+                                                    {/* Trader Rate Filter (Admin Only) */}
+                                                    {isAdmin && (
+                                                        <div className="w-[145px] sm:w-[160px]">
+                                                            <Select value={selectedTraderRate} onValueChange={setSelectedTraderRate}>
+                                                                <SelectTrigger className="h-9 text-xs bg-white dark:bg-neutral-900 border-purple-200 dark:border-purple-900/60 text-purple-900 dark:text-purple-200">
+                                                                    <SelectValue placeholder="All Trader Rates" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="all">All Trader Rates</SelectItem>
+                                                                    {availableTraderRates.map((r) => (
+                                                                        <SelectItem key={r.value} value={r.value}>
+                                                                            {r.label} ({r.count})
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Active Filter Reset */}
+                                                    {(selectedUserRate !== 'all' || selectedTraderRate !== 'all' || appliedAppsSearch || selectedAllotmentFilter !== 'all') && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => {
+                                                                setSelectedUserRate('all');
+                                                                setSelectedTraderRate('all');
+                                                                setSelectedAllotmentFilter('all');
+                                                                setAppsSearchInput('');
+                                                                setAppliedAppsSearch('');
+                                                            }}
+                                                            className="h-9 px-2 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 shrink-0"
+                                                            title="Reset active filters"
+                                                        >
+                                                            <X className="h-3.5 w-3.5 mr-1" />
+                                                            Reset
+                                                        </Button>
+                                                    )}
 
                                                 {/* Live Search Input */}
                                                 <div className="relative min-w-[200px] flex-1 max-w-xs">
@@ -2328,6 +2504,7 @@ export default function IpoShow({
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
 
                                         {filteredBatches.length === 0 ? (
                                             <div className="py-10 text-center space-y-2">

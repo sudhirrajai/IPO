@@ -45,10 +45,10 @@ class CheckBulkAllotmentsJob implements ShouldQueue
             $query->whereIn('id', $this->batchIds);
         } elseif ($this->ipoId) {
             $query->where('ipo_id', $this->ipoId)
-                ->whereIn('application_status', ['ready', 'submitted', 'confirmed', 'pending_allotment', 'pending_approval']);
+                ->whereNotIn('application_status', ['cancelled']);
         } else {
             // Check all unallotted batches for active/closed IPOs
-            $query->whereIn('application_status', ['ready', 'submitted', 'confirmed', 'pending_allotment']);
+            $query->whereNotIn('application_status', ['cancelled']);
         }
 
         $batches = $query->get();
