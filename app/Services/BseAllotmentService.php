@@ -183,6 +183,8 @@ class BseAllotmentService
             ];
         }
 
+        $data = null;
+
         try {
             $response = Http::withHeaders(self::getHeaders())
                 ->timeout(12)
