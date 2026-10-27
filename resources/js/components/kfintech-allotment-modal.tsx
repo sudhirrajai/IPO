@@ -58,6 +58,7 @@ interface MultiSourceAllotmentModalProps {
     onClose: () => void;
     isLoading: boolean;
     result: AllotmentResultData | null;
+    ipoId?: number;
     batchId?: number;
     companyName?: string;
     symbol?: string;
@@ -76,6 +77,7 @@ export default function KfintechAllotmentModal({
     onClose,
     isLoading,
     result,
+    ipoId,
     batchId,
     companyName,
     symbol,
@@ -93,6 +95,12 @@ export default function KfintechAllotmentModal({
     const [liveResult, setLiveResult] = useState<AllotmentResultData | null>(result);
     const [isCheckingBackground, setIsCheckingBackground] = useState<boolean>(false);
 
+    // Live KFintech manual query state
+    const [kfinQueryType, setKfinQueryType] = useState<'pan' | 'appno' | 'dpclid'>('pan');
+    const [kfinQueryInput, setKfinQueryInput] = useState<string>(panNumber || '');
+    const [isKfinLiveChecking, setIsKfinLiveChecking] = useState<boolean>(false);
+    const [kfinLiveFeedback, setKfinLiveFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
     // Keep liveResult synchronized with prop changes
     useEffect(() => {
         setLiveResult(result);
@@ -102,6 +110,13 @@ export default function KfintechAllotmentModal({
             setIsCheckingBackground(false);
         }
     }, [result]);
+
+    // Keep query input in sync with application pan
+    useEffect(() => {
+        if (panNumber) {
+            setKfinQueryInput(panNumber);
+        }
+    }, [panNumber]);
 
     // Live background polling when an allotment check is queued or running
     useEffect(() => {
@@ -191,6 +206,108 @@ export default function KfintechAllotmentModal({
             setCopiedField(fieldName);
             setTimeout(() => setCopiedField(null), 2000);
         });
+    };
+
+    const handleKfinLiveQuery = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        const queryVal = kfinQueryInput.trim().toUpperCase();
+        if (!queryVal) {
+            setKfinLiveFeedback({ type: 'error', message: `Please enter a valid ${kfinQueryType.toUpperCase()}.` });
+            return;
+        }
+
+        setIsKfinLiveChecking(true);
+        setKfinLiveFeedback(null);
+
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+
+            if (ipoId) {
+                const response = await fetch(`/ipos/${ipoId}/kfintech-live-check`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
+                    },
+                    body: JSON.stringify({
+                        identifier: queryVal,
+                        type: kfinQueryType,
+                        batch_id: batchId,
+                    }),
+                });
+
+                const data = await response.json();
+                if (data.success && data.found) {
+                    const formatted: AllotmentResultData = {
+                        success: true,
+                        found: true,
+                        status: data.allotted ? 'allotted' : 'not_allotted',
+                        allotted: Boolean(data.allotted),
+                        all_shares: data.all_shares ?? 0,
+                        app_shares: data.app_shares ?? 0,
+                        application_number: data.application_number,
+                        name_from_pan: data.name_from_pan,
+                        dp_clid: data.dp_clid,
+                        pan_masked: data.pan_masked,
+                        pan_full: queryVal,
+                        provider: 'kfintech',
+                        kfin_ipo_name: data.kfin_ipo_name || companyName,
+                        checked_at: new Date().toISOString(),
+                    };
+                    setLiveResult(formatted);
+                    setKfinLiveFeedback({
+                        type: 'success',
+                        message: data.allotted
+                            ? `🎉 Verified Allotment: ${data.all_shares} shares allotted on KFintech.`
+                            : `Application verified on KFintech: 0 shares allotted.`,
+                    });
+                    onStatusUpdate?.(data);
+                } else {
+                    setKfinLiveFeedback({
+                        type: 'info',
+                        message: data.message || `No allotment record found for ${queryVal} on KFintech portal.`,
+                    });
+                }
+            } else if (batchId) {
+                const response = await fetch(`/applications/${batchId}/check-allotment?provider=kfintech&sync=1`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
+                    },
+                });
+
+                const data = await response.json();
+                if (data.success && data.found) {
+                    setLiveResult(data);
+                    setKfinLiveFeedback({
+                        type: 'success',
+                        message: data.allotted
+                            ? `🎉 Verified Allotment: ${data.all_shares} shares allotted on KFintech.`
+                            : `Application verified on KFintech: 0 shares allotted.`,
+                    });
+                    onStatusUpdate?.(data);
+                } else {
+                    setKfinLiveFeedback({
+                        type: 'info',
+                        message: data.message || 'No allotment record found on KFintech portal.',
+                    });
+                }
+            } else {
+                onRecheck?.('kfintech');
+            }
+        } catch (err: any) {
+            setKfinLiveFeedback({
+                type: 'error',
+                message: err?.message || 'Failed to connect to KFintech allotment gateway.',
+            });
+        } finally {
+            setIsKfinLiveChecking(false);
+        }
     };
 
     const nseVerificationUrl = 'https://www.nseindia.com/invest/check-trades-bids-verify-ipo-bids';
@@ -831,32 +948,218 @@ export default function KfintechAllotmentModal({
 
                             {/* TAB 4: KFINTECH */}
                             {activeTab === 'kfintech' && (
-                                <div className="space-y-3.5">
-                                    <div className="rounded-xl bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent border border-blue-500/25 p-3.5 space-y-2.5">
-                                        <div>
-                                            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400 block">
-                                                KFintech Technologies (Registrar)
-                                            </span>
-                                            <h3 className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
-                                                Direct Registrar Database Check
-                                            </h3>
-                                            <p className="text-[11px] text-neutral-500 mt-0.5">
-                                                Fetches DP ID, client ID, full allotment breakdown from KFintech.
-                                            </p>
-                                        </div>
-
-                                        <div className="flex items-center gap-2 pt-1">
+                                <div className="space-y-4">
+                                    {/* KFintech Header & Direct Linked Check */}
+                                    <div className="rounded-xl bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent border border-blue-500/25 p-3.5 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400 block">
+                                                        KFin Technologies (Official Registrar)
+                                                    </span>
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                                        ⚡ No Captcha • Instant Live API
+                                                    </span>
+                                                </div>
+                                                <h3 className="text-xs font-bold text-neutral-900 dark:text-neutral-100 mt-0.5">
+                                                    Official IPO Allotment Status Gateway
+                                                </h3>
+                                            </div>
                                             <Button
                                                 type="button"
+                                                size="sm"
                                                 onClick={() => onRecheck?.('kfintech')}
-                                                disabled={isLoading}
-                                                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-8 px-3 shadow-xs"
+                                                disabled={isLoading || isKfinLiveChecking}
+                                                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-7 px-2.5 shadow-xs"
+                                                title="Check application's linked PAN on KFintech"
                                             >
-                                                <Zap className="mr-1.5 h-3.5 w-3.5" />
-                                                Auto-Check KFintech
+                                                <Zap className="mr-1 h-3 w-3" />
+                                                Check Linked PAN
                                             </Button>
                                         </div>
+
+                                        {/* Live Search Form (matching https://ipostatus.kfintech.com/) */}
+                                        <div className="bg-white dark:bg-neutral-900 rounded-lg p-3 border border-neutral-200 dark:border-neutral-800 space-y-3">
+                                            <div className="text-[11px] font-semibold text-neutral-700 dark:text-neutral-300">
+                                                Select IPO: <span className="font-bold text-blue-600 dark:text-blue-400">{companyName || 'Active IPO'}</span>
+                                            </div>
+
+                                            {/* Query Type Radio Buttons */}
+                                            <div className="flex items-center gap-4 text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        name="kfinQueryType"
+                                                        value="appno"
+                                                        checked={kfinQueryType === 'appno'}
+                                                        onChange={() => setKfinQueryType('appno')}
+                                                        className="text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                                                    />
+                                                    Application No
+                                                </label>
+                                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        name="kfinQueryType"
+                                                        value="dpclid"
+                                                        checked={kfinQueryType === 'dpclid'}
+                                                        onChange={() => setKfinQueryType('dpclid')}
+                                                        className="text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                                                    />
+                                                    Demat Account
+                                                </label>
+                                                <label className="flex items-center gap-1.5 cursor-pointer font-bold text-neutral-900 dark:text-neutral-100">
+                                                    <input
+                                                        type="radio"
+                                                        name="kfinQueryType"
+                                                        value="pan"
+                                                        checked={kfinQueryType === 'pan'}
+                                                        onChange={() => setKfinQueryType('pan')}
+                                                        className="text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                                                    />
+                                                    PAN
+                                                </label>
+                                            </div>
+
+                                            {/* Query Input & Submit Button */}
+                                            <form onSubmit={handleKfinLiveQuery} className="flex gap-2">
+                                                <div className="relative flex-1">
+                                                    <input
+                                                        type="text"
+                                                        value={kfinQueryInput}
+                                                        onChange={(e) => setKfinQueryInput(e.target.value.toUpperCase())}
+                                                        placeholder={
+                                                            kfinQueryType === 'pan'
+                                                                ? 'Enter PAN no (e.g. ABCDE1234F)'
+                                                                : kfinQueryType === 'appno'
+                                                                ? 'Enter Application No'
+                                                                : 'Enter DP ID / Client ID'
+                                                        }
+                                                        maxLength={kfinQueryType === 'pan' ? 10 : 30}
+                                                        className="w-full h-8 px-2.5 text-xs font-mono uppercase bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                    />
+                                                </div>
+                                                <Button
+                                                    type="submit"
+                                                    disabled={isKfinLiveChecking || !kfinQueryInput.trim()}
+                                                    className="h-8 px-4 bg-[#3498db] hover:bg-[#2980b9] text-white font-semibold text-xs shadow-xs"
+                                                >
+                                                    {isKfinLiveChecking ? (
+                                                        <>
+                                                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                                            Querying...
+                                                        </>
+                                                    ) : (
+                                                        'Submit'
+                                                    )}
+                                                </Button>
+                                            </form>
+
+                                            {kfinLiveFeedback && (
+                                                <div
+                                                    className={`p-2 rounded text-xs flex items-center gap-2 ${
+                                                        kfinLiveFeedback.type === 'success'
+                                                            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                                            : kfinLiveFeedback.type === 'error'
+                                                            ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                                                            : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                                    }`}
+                                                >
+                                                    {kfinLiveFeedback.type === 'success' ? (
+                                                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                                                    ) : kfinLiveFeedback.type === 'error' ? (
+                                                        <XCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                                                    ) : (
+                                                        <Info className="h-4 w-4 shrink-0 text-amber-600" />
+                                                    )}
+                                                    <span>{kfinLiveFeedback.message}</span>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
+
+                                    {/* KFintech Official Result Card (Exact clone of KFintech portal result UI) */}
+                                    {liveResult && (liveResult.provider === 'kfintech' || liveResult.found) && liveResult.name_from_pan && (
+                                        <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 shadow-sm space-y-3">
+                                            <div className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 pb-2.5">
+                                                <h3 className="text-sm font-extrabold text-[#3498db] tracking-tight uppercase">
+                                                    {liveResult.kfin_ipo_name || companyName || 'IPO ALLOTMENT'}
+                                                </h3>
+                                                <Badge
+                                                    className={`px-2 py-0.5 text-xs font-bold uppercase rounded ${
+                                                        liveResult.allotted
+                                                            ? 'bg-emerald-600 hover:bg-emerald-600 text-white'
+                                                            : 'bg-rose-600 hover:bg-rose-600 text-white'
+                                                    }`}
+                                                >
+                                                    {liveResult.allotted ? 'Allotted' : 'Not Allotted'}
+                                                </Badge>
+                                            </div>
+
+                                            {/* Details Grid matching official card */}
+                                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                                <div className="space-y-0.5">
+                                                    <span className="text-[11px] text-neutral-500 block">Application Number:</span>
+                                                    <span className="font-bold text-neutral-900 dark:text-neutral-100 font-mono">
+                                                        {liveResult.application_number || 'N/A'}
+                                                    </span>
+                                                </div>
+                                                <div className="space-y-0.5">
+                                                    <span className="text-[11px] text-neutral-500 block">Name:</span>
+                                                    <span className="font-bold text-neutral-900 dark:text-neutral-100 uppercase">
+                                                        {liveResult.name_from_pan || 'N/A'}
+                                                    </span>
+                                                </div>
+
+                                                <div className="space-y-0.5">
+                                                    <span className="text-[11px] text-neutral-500 block">DP ID Client ID:</span>
+                                                    <span className="font-bold text-neutral-900 dark:text-neutral-100 font-mono">
+                                                        {liveResult.dp_clid || 'N/A'}
+                                                    </span>
+                                                </div>
+                                                <div className="space-y-0.5">
+                                                    <span className="text-[11px] text-neutral-500 block">PAN:</span>
+                                                    <span className="font-bold text-neutral-900 dark:text-neutral-100 font-mono uppercase">
+                                                        {liveResult.pan_masked || liveResult.pan_full || 'N/A'}
+                                                    </span>
+                                                </div>
+
+                                                <div className="space-y-0.5">
+                                                    <span className="text-[11px] text-neutral-500 block">Applied:</span>
+                                                    <span className="font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+                                                        {liveResult.app_shares ?? 0}
+                                                    </span>
+                                                </div>
+                                                <div className="space-y-0.5">
+                                                    <span className="text-[11px] text-neutral-500 block">Allotted:</span>
+                                                    <span className={`font-extrabold text-sm ${liveResult.allotted ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-neutral-100'}`}>
+                                                        {liveResult.all_shares ?? 0}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Link / Sync Button if application batch is present */}
+                                            {batchId && (
+                                                <div className="pt-2 flex justify-end">
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            if (liveResult.allotted) {
+                                                                onMarkStatus?.('allotted');
+                                                            } else {
+                                                                onMarkStatus?.('not_allotted');
+                                                            }
+                                                        }}
+                                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs h-7 px-3 shadow-xs"
+                                                    >
+                                                        <Check className="mr-1 h-3 w-3" />
+                                                        Confirm & Update Batch Status
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

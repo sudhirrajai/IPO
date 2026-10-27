@@ -272,7 +272,7 @@ export default function ApplicationsIndex({
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-            const response = await fetch(`/applications/${batch.id}/check-allotment?provider=${encodeURIComponent(provider)}`, {
+            const response = await fetch(`/applications/${batch.id}/check-allotment?provider=${encodeURIComponent(provider)}&sync=1`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
@@ -309,6 +309,20 @@ export default function ApplicationsIndex({
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
                 pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
             });
+
+            if (data.status !== 'checking' && !data.queued) {
+                setCheckingBatchIds((prev) => {
+                    const next = { ...prev };
+                    delete next[batch.id];
+                    return next;
+                });
+                if (data.found) {
+                    setCheckedBatchIds((prev) => ({
+                        ...prev,
+                        [batch.id]: { allotted: Boolean(data.allotted), details: data },
+                    }));
+                }
+            }
         } catch (err: any) {
             setAllotmentResult({
                 success: false,
@@ -1466,6 +1480,7 @@ export default function ApplicationsIndex({
                 onClose={() => setAllotmentModalOpen(false)}
                 isLoading={allotmentLoading}
                 result={allotmentResult}
+                ipoId={allotmentBatch?.ipo_id || (selectedIpo !== 'all' ? Number(selectedIpo) : undefined)}
                 batchId={allotmentBatch?.id}
                 companyName={allotmentBatch?.ipo?.company_name}
                 symbol={allotmentBatch?.ipo?.symbol}

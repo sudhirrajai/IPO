@@ -76,6 +76,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/applications/export/user-csv', [CsvExportController::class, 'exportAllUserCsv'])->name('applications.export.user-csv');
     Route::get('/applications/export/trader-csv', [CsvExportController::class, 'exportAllTraderCsv'])->name('applications.export.trader-csv');
     Route::post('/ipos/{ipo}/applications/approve-all', [ApplicationBatchController::class, 'approveAll'])->name('ipos.applications.approve-all');
+    Route::post('/ipos/{ipo}/kfintech-live-check', [IpoController::class, 'kfintechLiveCheck'])->name('ipos.kfintech-live-check');
 
     // Admin-Only Routes
     Route::middleware(['admin'])->group(function () {

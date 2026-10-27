@@ -537,11 +537,17 @@ class ApplicationBatchService
         $ipo = $batch->ipo;
         $registrar = strtolower((string) ($ipo?->registrar ?? ''));
 
-        // 1. If IPO registrar is KFintech, check KFintech first
-        if (str_contains($registrar, 'kfin') || ! empty($ipo?->kfin_client_id)) {
-            $kfinResult = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
-            if ($kfinResult['success'] && ($kfinResult['found'] ?? false)) {
-                return $kfinResult;
+        // 1. Check KFintech first if IPO matches KFintech active listings (Instant REST API, no captcha)
+        if ($ipo) {
+            $kfinMatch = ! empty($ipo->kfin_client_id)
+                || str_contains($registrar, 'kfin')
+                || (bool) \App\Services\KfintechAllotmentService::findMatchingKfinIpo($ipo);
+
+            if ($kfinMatch) {
+                $kfinResult = \App\Services\KfintechAllotmentService::checkBatchAllotment($batch);
+                if ($kfinResult['success'] && ($kfinResult['found'] ?? false)) {
+                    return $kfinResult;
+                }
             }
         }
 

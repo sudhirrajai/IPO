@@ -570,7 +570,7 @@ export default function IpoShow({
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-            const response = await fetch(`/applications/${batch.id}/check-allotment?provider=${encodeURIComponent(provider)}`, {
+            const response = await fetch(`/applications/${batch.id}/check-allotment?provider=${encodeURIComponent(provider)}&sync=1`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
@@ -607,6 +607,20 @@ export default function IpoShow({
                 pan_full: batch.pan_number || batch.batch_pans?.[0]?.pan_number_snapshot,
                 pan_masked: data.pan_masked || (batch.pan_number ? `XXXXXX${batch.pan_number.slice(-4)}` : undefined),
             });
+
+            if (data.status !== 'checking' && !data.queued) {
+                setCheckingBatchIds((prev) => {
+                    const next = { ...prev };
+                    delete next[batch.id];
+                    return next;
+                });
+                if (data.found) {
+                    setCheckedBatchIds((prev) => ({
+                        ...prev,
+                        [batch.id]: { allotted: Boolean(data.allotted), details: data },
+                    }));
+                }
+            }
         } catch (err: any) {
             setAllotmentResult({
                 success: false,
@@ -622,7 +636,9 @@ export default function IpoShow({
 
     const handleCheckAllAllotments = () => {
         setIsCheckingAllAllotments(true);
-        router.post(`/ipos/${ipo.id}/check-allotments`, {}, {
+        router.post(`/ipos/${ipo.id}/check-allotments`, {
+            provider: 'kfintech',
+        }, {
             preserveScroll: true,
             onFinish: () => setIsCheckingAllAllotments(false),
         });
@@ -4104,6 +4120,7 @@ export default function IpoShow({
                 onClose={() => setAllotmentModalOpen(false)}
                 isLoading={allotmentLoading}
                 result={allotmentResult}
+                ipoId={ipo.id}
                 batchId={allotmentBatch?.id}
                 companyName={ipo.company_name}
                 symbol={ipo.symbol}

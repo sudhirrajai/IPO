@@ -387,9 +387,9 @@ class ApplicationBatchController extends Controller
         }
 
         $provider = strtolower((string) $request->input('provider', 'auto'));
-        $isSync = $request->input('sync') === '1' || $request->input('background') === '0';
+        $isSync = $request->input('sync') === '1' || $request->input('background') === '0' || $provider === 'kfintech';
 
-        // Synchronous check if requested
+        // Synchronous check if requested or for instant REST API providers (e.g. KFintech)
         if ($isSync) {
             $result = \App\Services\ApplicationBatchService::executeCheckAllotment($batch, $provider);
 

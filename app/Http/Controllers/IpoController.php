@@ -325,10 +325,118 @@ class IpoController extends Controller
 
     public function checkAllotments(Request $request, Ipo $ipo): RedirectResponse
     {
-        $provider = (string) $request->input('provider', 'auto');
+        $provider = strtolower((string) $request->input('provider', 'kfintech'));
+
+        // Query pending batches for this IPO
+        $batchesQuery = $ipo->applicationBatches()
+            ->whereIn('application_status', ['ready', 'submitted', 'confirmed', 'pending_allotment', 'pending_approval']);
+
+        $count = $batchesQuery->count();
+
+        // For small batch counts (<= 30) or when KFintech is selected, check synchronously for instant results
+        if ($count > 0 && ($count <= 30 || $provider === 'kfintech' || $request->input('sync') === '1')) {
+            $batches = $batchesQuery->get();
+            $allotted = 0;
+            $notAllotted = 0;
+            $notFound = 0;
+
+            foreach ($batches as $batch) {
+                $res = \App\Services\ApplicationBatchService::executeCheckAllotment($batch, $provider);
+                if ($res['success'] && ($res['found'] ?? false)) {
+                    if ($res['allotted'] ?? false) {
+                        $allotted++;
+                    } else {
+                        $notAllotted++;
+                    }
+                } else {
+                    $notFound++;
+                }
+            }
+
+            $ipo->updateQuietly(['allotment_scraped_at' => now()]);
+
+            $provLabel = strtoupper($provider);
+            $msg = "{$provLabel} allotment check complete for {$ipo->company_name}: {$allotted} allotted, {$notAllotted} not allotted";
+            if ($notFound > 0) {
+                $msg .= ", {$notFound} pending/not in registry";
+            }
+            $msg .= '.';
+
+            return back()->with('success', $msg);
+        }
+
         \App\Jobs\CheckBulkAllotmentsJob::dispatch([], $ipo->id, $provider, $request->user()?->id);
 
-        return back()->with('success', "Background allotment check started for {$ipo->company_name}. Applications are syncing in the background.");
+        return back()->with('success', "Allotment check running for {$ipo->company_name}. Results will sync automatically.");
+    }
+
+    /**
+     * Query KFintech portal live for any PAN, Application Number, or DP ID.
+     */
+    public function kfintechLiveCheck(Request $request, Ipo $ipo): \Illuminate\Http\JsonResponse
+    {
+        $validated = $request->validate([
+            'identifier' => 'required|string|max:50',
+            'type' => 'nullable|string|in:pan,appno,dpclid',
+            'batch_id' => 'nullable|integer',
+        ]);
+
+        $type = $validated['type'] ?? 'pan';
+        $identifier = trim((string) $validated['identifier']);
+
+        $kfinMatch = \App\Services\KfintechAllotmentService::findMatchingKfinIpo($ipo);
+        if (! $kfinMatch) {
+            return response()->json([
+                'success' => false,
+                'found' => false,
+                'status' => 'not_on_kfintech',
+                'message' => "IPO {$ipo->company_name} is not currently registered on KFintech portal.",
+            ]);
+        }
+
+        $result = \App\Services\KfintechAllotmentService::queryAllotment($identifier, $kfinMatch['clientId'], $type);
+        $result['kfin_ipo_name'] = $kfinMatch['name'];
+        $result['client_id'] = $kfinMatch['clientId'];
+
+        // Optionally link and update batch if requested
+        if (! empty($validated['batch_id']) && $result['success'] && $result['found']) {
+            $batch = \App\Models\ApplicationBatch::find($validated['batch_id']);
+            if ($batch && $batch->ipo_id === $ipo->id) {
+                $batch->update([
+                    'allotment_details' => [
+                        'source' => 'kfintech',
+                        'status' => $result['status'],
+                        'found' => true,
+                        'allotted' => $result['allotted'],
+                        'allotted_shares' => $result['all_shares'],
+                        'applied_shares' => $result['app_shares'],
+                        'application_number' => $result['application_number'],
+                        'name_from_pan' => $result['name_from_pan'],
+                        'dp_clid' => $result['dp_clid'],
+                        'pan_masked' => $result['pan_masked'],
+                        'kfin_client_id' => $kfinMatch['clientId'],
+                        'kfin_ipo_name' => $kfinMatch['name'],
+                        'checked_at' => now()->toIso8601String(),
+                    ],
+                    'allotment_checked_at' => now(),
+                    'applicant_name' => ! empty($result['name_from_pan']) ? trim((string) $result['name_from_pan']) : $batch->applicant_name,
+                ]);
+
+                $targetStatus = $result['allotted'] ? 'allotted' : 'not_allotted';
+                \App\Services\ApplicationBatchService::updateStatus(
+                    $batch,
+                    $targetStatus,
+                    "Live checked via KFintech Allotment Portal (Applied: {$result['app_shares']}, Allotted: {$result['all_shares']})"
+                );
+
+                if (! empty($result['name_from_pan']) && ! empty($batch->pan_number)) {
+                    \App\Models\UserPan::where('pan_number', strtoupper($batch->pan_number))
+                        ->update(['account_holder_name' => trim((string) $result['name_from_pan'])]);
+                }
+            }
+        }
+
+        return response()->json($result);
     }
 
     public function toggleFavorite(Request $request, Ipo $ipo): RedirectResponse
