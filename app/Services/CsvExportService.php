@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ApplicationBatch;
 use App\Models\Ipo;
+use Shuchkin\SimpleXLSXGen;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CsvExportService
@@ -50,6 +51,22 @@ class CsvExportService
             fclose($handle);
         }, $filename, [
             'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+        ]);
+    }
+
+    /**
+     * Build streamed XLSX response with cell styling and background colors.
+     */
+    public static function buildExcelStreamResponse(string $filename, array $sheetData): StreamedResponse
+    {
+        return response()->streamDownload(function () use ($sheetData) {
+            $xlsx = SimpleXLSXGen::fromArray($sheetData);
+            $xlsx->saveAs('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'Cache-Control' => 'no-cache, no-store, must-revalidate',
             'Pragma' => 'no-cache',
             'Expires' => '0',
@@ -189,10 +206,9 @@ class CsvExportService
     }
 
     /**
-     * Export User Rates CSV.
-     * Columns: Serial No, Name of PAN Holder, PAN Number, Rate Applied
+     * Extract flattened rows for User Rates with Allotment Status.
      */
-    public static function exportUserCsv(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    public static function getUserRatesData(?Ipo $ipo = null, ?int $userId = null): array
     {
         $query = ApplicationBatch::with(['user', 'batchPans.userPan'])
             ->where('application_status', '!=', 'cancelled');
@@ -206,15 +222,7 @@ class CsvExportService
         }
 
         $batches = $query->orderBy('id')->get();
-
-        $headers = [
-            'Serial No',
-            'Name of PAN Holder',
-            'PAN Number',
-            'Rate Applied',
-        ];
-
-        $rows = [];
+        $items = [];
         $serialNo = 1;
 
         foreach ($batches as $batch) {
@@ -225,6 +233,15 @@ class CsvExportService
             $formattedRate = (float) $userRate == (int) $userRate
                 ? (string) (int) $userRate
                 : number_format((float) $userRate, 2, '.', '');
+
+            $isAllotted = $batch->application_status === 'allotted' || (bool) ($batch->allotment_details['allotted'] ?? false);
+            $isNotAllotted = $batch->application_status === 'not_allotted' || (
+                isset($batch->allotment_details['allotted']) && ! $batch->allotment_details['allotted']
+            );
+            $allottedShares = $batch->allotment_details['allotted_shares'] ?? null;
+            $statusText = $isAllotted
+                ? 'ALLOTTED' . ($allottedShares ? " ({$allottedShares} sh)" : '')
+                : ($isNotAllotted ? 'NOT ALLOTTED' : 'PENDING');
 
             $pans = $batch->batchPans;
 
@@ -241,11 +258,13 @@ class CsvExportService
                         $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
                     }
 
-                    $rows[] = [
-                        $serialNo++,
-                        $holderName,
-                        strtoupper($panNumber),
-                        $formattedRate,
+                    $items[] = [
+                        'serial' => $serialNo++,
+                        'holder_name' => $holderName,
+                        'pan_number' => strtoupper($panNumber),
+                        'rate' => $formattedRate,
+                        'is_allotted' => $isAllotted,
+                        'status' => $statusText,
                     ];
                 }
             } else {
@@ -260,14 +279,88 @@ class CsvExportService
                 }
 
                 for ($i = 0; $i < $count; $i++) {
-                    $rows[] = [
-                        $serialNo++,
-                        $holderName,
-                        strtoupper($panNumber),
-                        $formattedRate,
+                    $items[] = [
+                        'serial' => $serialNo++,
+                        'holder_name' => $holderName,
+                        'pan_number' => strtoupper($panNumber),
+                        'rate' => $formattedRate,
+                        'is_allotted' => $isAllotted,
+                        'status' => $statusText,
                     ];
                 }
             }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Export User Rates Excel (.xlsx) with Yellow Highlight for Allotted.
+     */
+    public static function exportUserExcel(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    {
+        $items = self::getUserRatesData($ipo, $userId);
+
+        $headers = [
+            '<b>Serial No</b>',
+            '<b>Name of PAN Holder</b>',
+            '<b>PAN Number</b>',
+            '<b>Rate Applied</b>',
+            '<b>Allotment Status</b>',
+        ];
+
+        $rows = [$headers];
+        foreach ($items as $item) {
+            $statusCell = $item['is_allotted']
+                ? '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>'
+                : $item['status'];
+
+            $rows[] = [
+                $item['serial'],
+                $item['holder_name'],
+                $item['pan_number'],
+                $item['rate'],
+                $statusCell,
+            ];
+        }
+
+        $name = $ipo ? preg_replace('/[^a-zA-Z0-9_\-]/', '_', $ipo->company_name) : 'All_IPOs';
+        $filename = "{$name}_user_rates_".date('Y-m-d_His').'.xlsx';
+
+        if ($ipo) {
+            AuditService::log('excel_exported', $ipo, null, [
+                'type' => 'user_rates_excel',
+                'records_count' => count($items),
+            ], "Exported user rates Excel for {$ipo->company_name}");
+        }
+
+        return self::buildExcelStreamResponse($filename, $rows);
+    }
+
+    /**
+     * Export User Rates CSV with Allotment Status column.
+     */
+    public static function exportUserCsv(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    {
+        $items = self::getUserRatesData($ipo, $userId);
+
+        $headers = [
+            'Serial No',
+            'Name of PAN Holder',
+            'PAN Number',
+            'Rate Applied',
+            'Allotment Status',
+        ];
+
+        $rows = [];
+        foreach ($items as $item) {
+            $rows[] = [
+                $item['serial'],
+                $item['holder_name'],
+                $item['pan_number'],
+                $item['rate'],
+                $item['status'],
+            ];
         }
 
         $name = $ipo ? preg_replace('/[^a-zA-Z0-9_\-]/', '_', $ipo->company_name) : 'All_IPOs';
@@ -284,10 +377,9 @@ class CsvExportService
     }
 
     /**
-     * Export Trader Rates CSV.
-     * Columns: Serial No, Name of PAN Holder, PAN Number, Trader Rate
+     * Extract flattened rows for Trader Rates with Allotment Status.
      */
-    public static function exportTraderCsv(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    public static function getTraderRatesData(?Ipo $ipo = null, ?int $userId = null): array
     {
         $query = ApplicationBatch::with(['user', 'batchPans.userPan'])
             ->where('application_status', '!=', 'cancelled');
@@ -301,15 +393,7 @@ class CsvExportService
         }
 
         $batches = $query->orderBy('id')->get();
-
-        $headers = [
-            'Serial No',
-            'Name of PAN Holder',
-            'PAN Number',
-            'Trader Rate',
-        ];
-
-        $rows = [];
+        $items = [];
         $serialNo = 1;
 
         foreach ($batches as $batch) {
@@ -320,6 +404,15 @@ class CsvExportService
             $formattedRate = (float) $traderRate == (int) $traderRate
                 ? (string) (int) $traderRate
                 : number_format((float) $traderRate, 2, '.', '');
+
+            $isAllotted = $batch->application_status === 'allotted' || (bool) ($batch->allotment_details['allotted'] ?? false);
+            $isNotAllotted = $batch->application_status === 'not_allotted' || (
+                isset($batch->allotment_details['allotted']) && ! $batch->allotment_details['allotted']
+            );
+            $allottedShares = $batch->allotment_details['allotted_shares'] ?? null;
+            $statusText = $isAllotted
+                ? 'ALLOTTED' . ($allottedShares ? " ({$allottedShares} sh)" : '')
+                : ($isNotAllotted ? 'NOT ALLOTTED' : 'PENDING');
 
             $pans = $batch->batchPans;
 
@@ -336,11 +429,13 @@ class CsvExportService
                         $holderName = $batch->applicant_name ?: ($batch->user?->name ?: 'Applicant');
                     }
 
-                    $rows[] = [
-                        $serialNo++,
-                        $holderName,
-                        strtoupper($panNumber),
-                        $formattedRate,
+                    $items[] = [
+                        'serial' => $serialNo++,
+                        'holder_name' => $holderName,
+                        'pan_number' => strtoupper($panNumber),
+                        'rate' => $formattedRate,
+                        'is_allotted' => $isAllotted,
+                        'status' => $statusText,
                     ];
                 }
             } else {
@@ -355,14 +450,88 @@ class CsvExportService
                 }
 
                 for ($i = 0; $i < $count; $i++) {
-                    $rows[] = [
-                        $serialNo++,
-                        $holderName,
-                        strtoupper($panNumber),
-                        $formattedRate,
+                    $items[] = [
+                        'serial' => $serialNo++,
+                        'holder_name' => $holderName,
+                        'pan_number' => strtoupper($panNumber),
+                        'rate' => $formattedRate,
+                        'is_allotted' => $isAllotted,
+                        'status' => $statusText,
                     ];
                 }
             }
+        }
+
+        return $items;
+    }
+
+    /**
+     * Export Trader Rates Excel (.xlsx) with Yellow Highlight for Allotted.
+     */
+    public static function exportTraderExcel(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    {
+        $items = self::getTraderRatesData($ipo, $userId);
+
+        $headers = [
+            '<b>Serial No</b>',
+            '<b>Name of PAN Holder</b>',
+            '<b>PAN Number</b>',
+            '<b>Trader Rate</b>',
+            '<b>Allotment Status</b>',
+        ];
+
+        $rows = [$headers];
+        foreach ($items as $item) {
+            $statusCell = $item['is_allotted']
+                ? '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>'
+                : $item['status'];
+
+            $rows[] = [
+                $item['serial'],
+                $item['holder_name'],
+                $item['pan_number'],
+                $item['rate'],
+                $statusCell,
+            ];
+        }
+
+        $name = $ipo ? preg_replace('/[^a-zA-Z0-9_\-]/', '_', $ipo->company_name) : 'All_IPOs';
+        $filename = "{$name}_trader_rates_".date('Y-m-d_His').'.xlsx';
+
+        if ($ipo) {
+            AuditService::log('excel_exported', $ipo, null, [
+                'type' => 'trader_rates_excel',
+                'records_count' => count($items),
+            ], "Exported trader rates Excel for {$ipo->company_name}");
+        }
+
+        return self::buildExcelStreamResponse($filename, $rows);
+    }
+
+    /**
+     * Export Trader Rates CSV with Allotment Status column.
+     */
+    public static function exportTraderCsv(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    {
+        $items = self::getTraderRatesData($ipo, $userId);
+
+        $headers = [
+            'Serial No',
+            'Name of PAN Holder',
+            'PAN Number',
+            'Trader Rate',
+            'Allotment Status',
+        ];
+
+        $rows = [];
+        foreach ($items as $item) {
+            $rows[] = [
+                $item['serial'],
+                $item['holder_name'],
+                $item['pan_number'],
+                $item['rate'],
+                $item['status'],
+            ];
         }
 
         $name = $ipo ? preg_replace('/[^a-zA-Z0-9_\-]/', '_', $ipo->company_name) : 'All_IPOs';

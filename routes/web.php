@@ -69,12 +69,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Application Status (Users can update their own, Admins can update any)
     Route::post('/applications/{batch}/status', [ApplicationBatchController::class, 'updateStatus'])->name('applications.status');
 
-    // CSV Exports & Bulk Approvals
+    // CSV & Excel Exports & Bulk Approvals
     Route::get('/ipos/{ipo}/export/user-csv', [CsvExportController::class, 'exportUserCsv'])->name('ipos.export.user-csv');
+    Route::get('/ipos/{ipo}/export/user-excel', [CsvExportController::class, 'exportUserExcel'])->name('ipos.export.user-excel');
     Route::get('/ipos/{ipo}/export/trader-csv', [CsvExportController::class, 'exportTraderCsv'])->name('ipos.export.trader-csv');
+    Route::get('/ipos/{ipo}/export/trader-excel', [CsvExportController::class, 'exportTraderExcel'])->name('ipos.export.trader-excel');
     Route::get('/ipos/{ipo}/export/trader', [CsvExportController::class, 'exportTraderPanSubmission'])->name('ipos.export.trader');
     Route::get('/applications/export/user-csv', [CsvExportController::class, 'exportAllUserCsv'])->name('applications.export.user-csv');
+    Route::get('/applications/export/user-excel', [CsvExportController::class, 'exportAllUserExcel'])->name('applications.export.user-excel');
     Route::get('/applications/export/trader-csv', [CsvExportController::class, 'exportAllTraderCsv'])->name('applications.export.trader-csv');
+    Route::get('/applications/export/trader-excel', [CsvExportController::class, 'exportAllTraderExcel'])->name('applications.export.trader-excel');
     Route::post('/ipos/{ipo}/applications/approve-all', [ApplicationBatchController::class, 'approveAll'])->name('ipos.applications.approve-all');
     Route::post('/ipos/{ipo}/kfintech-live-check', [IpoController::class, 'kfintechLiveCheck'])->name('ipos.kfintech-live-check');
 

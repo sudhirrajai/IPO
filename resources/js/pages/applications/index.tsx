@@ -38,6 +38,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -544,29 +551,86 @@ export default function ApplicationsIndex({
                             Bulk Check Allotments
                         </Button>
 
-                        {/* CSV Export Option 1: User Rates CSV */}
-                        <a
-                            href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/user-csv` : '/applications/export/user-csv'}
-                            download
-                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 shadow-2xs transition-colors"
-                            title="Export CSV with Serial No, PAN Holder, PAN, and User Applied Rate"
-                        >
-                            <Download className="h-3.5 w-3.5 text-blue-600" />
-                            User Rates CSV
-                        </a>
-
-                        {/* CSV Export Option 2: Trader Rates CSV (Admin only) */}
-                        {isAdmin && (
-                            <a
-                                href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/trader-csv` : '/applications/export/trader-csv'}
-                                download
-                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-purple-300 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-950/40 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 shadow-2xs transition-colors"
-                                title="Export CSV with Serial No, PAN Holder, PAN, and Trader Rate"
-                            >
-                                <FileSpreadsheet className="h-3.5 w-3.5 text-purple-600" />
-                                Trader Rates CSV
-                            </a>
-                        )}
+                        {/* Export Dropdown (Excel & CSV) */}
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-9 text-xs font-semibold text-neutral-700 dark:text-neutral-200 border-neutral-300 dark:border-neutral-700"
+                                >
+                                    <Download className="mr-1.5 h-3.5 w-3.5 text-neutral-500" />
+                                    Export <ChevronDown className="ml-1 h-3 w-3 opacity-60" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56 text-xs p-1.5 space-y-0.5">
+                                <DropdownMenuItem asChild>
+                                    <a
+                                        href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/user-excel` : '/applications/export/user-excel'}
+                                        download
+                                        className="flex items-start gap-2.5 cursor-pointer w-full p-2 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                                        title="Excel file (.xlsx) with yellow highlight on allotted rows"
+                                    >
+                                        <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                                        <div className="flex flex-col flex-1 leading-tight">
+                                            <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                                                User Rates (Excel)
+                                                <span className="inline-block w-2 h-2 rounded-full bg-amber-400 ring-2 ring-amber-200" title="Yellow highlighted for allotted" />
+                                            </span>
+                                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">Yellow highlight on allotted</span>
+                                        </div>
+                                    </a>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem asChild>
+                                    <a
+                                        href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/user-csv` : '/applications/export/user-csv'}
+                                        download
+                                        className="flex items-start gap-2.5 cursor-pointer w-full p-2 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                                    >
+                                        <FileText className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                                        <div className="flex flex-col flex-1 leading-tight">
+                                            <span className="font-medium text-neutral-800 dark:text-neutral-200">User Rates (CSV)</span>
+                                            <span className="text-[10px] text-neutral-400 mt-0.5">Plain CSV format</span>
+                                        </div>
+                                    </a>
+                                </DropdownMenuItem>
+                                {isAdmin && (
+                                    <>
+                                        <DropdownMenuSeparator className="my-1" />
+                                        <DropdownMenuItem asChild>
+                                            <a
+                                                href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/trader-excel` : '/applications/export/trader-excel'}
+                                                download
+                                                className="flex items-start gap-2.5 cursor-pointer w-full p-2 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                                                title="Trader Rates Excel with yellow highlight on allotted rows"
+                                            >
+                                                <FileSpreadsheet className="h-4 w-4 text-purple-600 shrink-0 mt-0.5" />
+                                                <div className="flex flex-col flex-1 leading-tight">
+                                                    <span className="font-semibold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                                                        Trader Rates (Excel)
+                                                        <span className="inline-block w-2 h-2 rounded-full bg-amber-400 ring-2 ring-amber-200" title="Yellow highlighted for allotted" />
+                                                    </span>
+                                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">Yellow highlight on allotted</span>
+                                                </div>
+                                            </a>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem asChild>
+                                            <a
+                                                href={selectedIpo !== 'all' ? `/ipos/${selectedIpo}/export/trader-csv` : '/applications/export/trader-csv'}
+                                                download
+                                                className="flex items-start gap-2.5 cursor-pointer w-full p-2 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                                            >
+                                                <FileText className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
+                                                <div className="flex flex-col flex-1 leading-tight">
+                                                    <span className="font-medium text-purple-800 dark:text-purple-300">Trader Rates (CSV)</span>
+                                                    <span className="text-[10px] text-neutral-400 mt-0.5">Plain CSV format</span>
+                                                </div>
+                                            </a>
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
 
                         <Button asChild className="bg-emerald-600 hover:bg-emerald-700 text-white">
                             <Link href="/ipos">
