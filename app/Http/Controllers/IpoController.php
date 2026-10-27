@@ -365,6 +365,11 @@ class IpoController extends Controller
             return back()->with('success', $msg);
         }
 
+        // Mark batches as checking immediately so the UI displays active spinners on next frame
+        foreach ($batchesQuery->get() as $b) {
+            \App\Services\ApplicationBatchService::markChecking($b);
+        }
+
         \App\Jobs\CheckBulkAllotmentsJob::dispatch([], $ipo->id, $provider, $request->user()?->id);
 
         return back()->with('success', "Allotment check running for {$ipo->company_name}. Results will sync automatically.");

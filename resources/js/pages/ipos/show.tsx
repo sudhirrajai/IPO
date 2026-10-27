@@ -529,18 +529,25 @@ export default function IpoShow({
     const [allotmentResult, setAllotmentResult] = useState<AllotmentResultData | null>(null);
     const [allotmentBatch, setAllotmentBatch] = useState<ApplicationBatch | null>(null);
     const [isCheckingAllAllotments, setIsCheckingAllAllotments] = useState(false);
+    const [bulkCheckRunning, setBulkCheckRunning] = useState(false);
 
-    // Live background polling when any batch in this IPO is checking in background
+    // Live background polling when any batch in this IPO is checking in background or bulk check was triggered
     useEffect(() => {
         const hasCheckingBatches = batches.some((b) => b.allotment_details?.checking) || Object.keys(checkingBatchIds).length > 0;
-        if (!hasCheckingBatches) return;
+        if (!hasCheckingBatches && !bulkCheckRunning) return;
+
+        // If no batches are checking anymore, smoothly turn off bulkCheckRunning
+        if (bulkCheckRunning && !hasCheckingBatches) {
+            const timeout = setTimeout(() => setBulkCheckRunning(false), 4000);
+            return () => clearTimeout(timeout);
+        }
 
         const interval = setInterval(() => {
             router.reload({ only: ['batches'], preserveScroll: true });
-        }, 3500);
+        }, 3000);
 
         return () => clearInterval(interval);
-    }, [batches, checkingBatchIds]);
+    }, [batches, checkingBatchIds, bulkCheckRunning]);
 
     // PAN copy indicator
     const [copiedPan, setCopiedPan] = useState<string | null>(null);
@@ -699,6 +706,7 @@ export default function IpoShow({
 
     const handleCheckAllAllotments = (provider: string = 'auto') => {
         setIsCheckingAllAllotments(true);
+        setBulkCheckRunning(true);
         router.post(`/ipos/${ipo.id}/check-allotments`, {
             provider,
         }, {
@@ -2289,6 +2297,21 @@ export default function IpoShow({
                                     </div>
                                 ) : (
                                     <>
+                                        {/* Bulk Check Active Running Banner */}
+                                        {(bulkCheckRunning || batches.some((b) => b.allotment_details?.checking)) && (
+                                            <div className="mb-3 flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-sky-300 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 text-xs shadow-xs animate-pulse">
+                                                <div className="flex items-center gap-2.5">
+                                                    <Loader2 className="h-4 w-4 animate-spin text-sky-600 shrink-0" />
+                                                    <span className="font-semibold">
+                                                        Checking allotments live across BSE & NSE portals... Applications are updating in real-time below!
+                                                    </span>
+                                                </div>
+                                                <Badge className="bg-sky-600 text-white font-mono text-[10px] shrink-0">
+                                                    Syncing Live
+                                                </Badge>
+                                            </div>
+                                        )}
+
                                         {/* Allotment Status Filters & Summary Banner */}
                                         <div className="flex flex-col gap-3 mb-4">
                                             {/* Allotment Metric Header Bar when allotments exist */}
