@@ -58,12 +58,57 @@ class CsvExportService
     }
 
     /**
+     * Sanitize and limit Excel sheet name to 31 characters without prohibited characters, ensuring uniqueness.
+     */
+    public static function sanitizeSheetName(string $name, array &$existingNames): string
+    {
+        $clean = str_replace(['\\', '/', '?', '*', ':', '[', ']'], '', $name);
+        $clean = trim($clean);
+        if ($clean === '') {
+            $clean = 'Sheet';
+        }
+        $clean = mb_substr($clean, 0, 31);
+
+        $final = $clean;
+        $idx = 2;
+        while (in_array(strtolower($final), array_map('strtolower', $existingNames), true)) {
+            $suffix = " ({$idx})";
+            $prefix = mb_substr($clean, 0, 31 - mb_strlen($suffix));
+            $final = $prefix . $suffix;
+            $idx++;
+        }
+
+        $existingNames[] = $final;
+        return $final;
+    }
+
+    /**
      * Build streamed XLSX response with cell styling and background colors.
      */
     public static function buildExcelStreamResponse(string $filename, array $sheetData): StreamedResponse
     {
         return response()->streamDownload(function () use ($sheetData) {
             $xlsx = SimpleXLSXGen::fromArray($sheetData);
+            $xlsx->saveAs('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+        ]);
+    }
+
+    /**
+     * Build streamed multi-sheet XLSX response with cell styling and background colors.
+     * @param array<int, array{name: string, rows: array}> $sheets
+     */
+    public static function buildMultiSheetExcelStreamResponse(string $filename, array $sheets): StreamedResponse
+    {
+        return response()->streamDownload(function () use ($sheets) {
+            $xlsx = new SimpleXLSXGen();
+            foreach ($sheets as $sheet) {
+                $xlsx->addSheet($sheet['rows'], $sheet['name']);
+            }
             $xlsx->saveAs('php://output');
         }, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -206,7 +251,7 @@ class CsvExportService
     }
 
     /**
-     * Extract flattened rows for User Rates with Allotment Status.
+     * Extract flattened rows for User Rates with Allotment Status, Trader Rates, and Diff Amount.
      */
     public static function getUserRatesData(?Ipo $ipo = null, ?int $userId = null): array
     {
@@ -226,13 +271,27 @@ class CsvExportService
         $serialNo = 1;
 
         foreach ($batches as $batch) {
-            $userRate = $batch->profit_sharing_type === 'fix'
+            $userRate = (float) ($batch->profit_sharing_type === 'fix'
                 ? $batch->profit_sharing_value
-                : ($batch->published_rate_snapshot ?: $batch->profit_sharing_value);
+                : ($batch->published_rate_snapshot ?: $batch->profit_sharing_value));
 
-            $formattedRate = (float) $userRate == (int) $userRate
+            $traderRate = (float) ((float) $batch->trader_rate_snapshot > 0
+                ? $batch->trader_rate_snapshot
+                : ($batch->published_rate_snapshot ?: $batch->profit_sharing_value));
+
+            $diffAmount = $traderRate - $userRate;
+
+            $formattedUserRate = (float) $userRate == (int) $userRate
                 ? (string) (int) $userRate
                 : number_format((float) $userRate, 2, '.', '');
+
+            $formattedTraderRate = (float) $traderRate == (int) $traderRate
+                ? (string) (int) $traderRate
+                : number_format((float) $traderRate, 2, '.', '');
+
+            $formattedDiff = (float) $diffAmount == (int) $diffAmount
+                ? (string) (int) $diffAmount
+                : number_format((float) $diffAmount, 2, '.', '');
 
             $isAllotted = $batch->application_status === 'allotted' || (bool) ($batch->allotment_details['allotted'] ?? false);
             $isNotAllotted = $batch->application_status === 'not_allotted' || (
@@ -243,6 +302,7 @@ class CsvExportService
                 ? 'ALLOTTED' . ($allottedShares ? " ({$allottedShares} sh)" : '')
                 : ($isNotAllotted ? 'NOT ALLOTTED' : 'PENDING');
 
+            $uName = $batch->user?->name ?: ($batch->applicant_name ?: 'User #' . $batch->user_id);
             $pans = $batch->batchPans;
 
             if ($pans->count() > 0) {
@@ -260,9 +320,17 @@ class CsvExportService
 
                     $items[] = [
                         'serial' => $serialNo++,
+                        'user_id' => $batch->user_id,
+                        'user_name' => $uName,
                         'holder_name' => $holderName,
                         'pan_number' => strtoupper($panNumber),
-                        'rate' => $formattedRate,
+                        'rate' => $formattedUserRate,
+                        'user_rate' => $userRate,
+                        'trader_rate' => $traderRate,
+                        'diff_amount' => $diffAmount,
+                        'formatted_user_rate' => $formattedUserRate,
+                        'formatted_trader_rate' => $formattedTraderRate,
+                        'formatted_diff' => $formattedDiff,
                         'is_allotted' => $isAllotted,
                         'status' => $statusText,
                     ];
@@ -281,9 +349,17 @@ class CsvExportService
                 for ($i = 0; $i < $count; $i++) {
                     $items[] = [
                         'serial' => $serialNo++,
+                        'user_id' => $batch->user_id,
+                        'user_name' => $uName,
                         'holder_name' => $holderName,
                         'pan_number' => strtoupper($panNumber),
-                        'rate' => $formattedRate,
+                        'rate' => $formattedUserRate,
+                        'user_rate' => $userRate,
+                        'trader_rate' => $traderRate,
+                        'diff_amount' => $diffAmount,
+                        'formatted_user_rate' => $formattedUserRate,
+                        'formatted_trader_rate' => $formattedTraderRate,
+                        'formatted_diff' => $formattedDiff,
                         'is_allotted' => $isAllotted,
                         'status' => $statusText,
                     ];
@@ -295,32 +371,239 @@ class CsvExportService
     }
 
     /**
-     * Export User Rates Excel (.xlsx) with Yellow Highlight for Allotted.
+     * Export User Rates Multi-Sheet Excel (.xlsx) with User-Wise Tabs, Yellow Highlight, Trader Rate, Diff, and Totals.
      */
-    public static function exportUserExcel(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    public static function exportUserExcel(?Ipo $ipo = null, ?int $userId = null, bool $isAdmin = true): StreamedResponse
     {
         $items = self::getUserRatesData($ipo, $userId);
 
-        $headers = [
-            '<b>Serial No</b>',
-            '<b>Name of PAN Holder</b>',
-            '<b>PAN Number</b>',
-            '<b>Rate Applied</b>',
-            '<b>Allotment Status</b>',
-        ];
+        $formatRate = static function (float $num): string {
+            return (float) $num == (int) $num ? (string) (int) $num : number_format($num, 2, '.', '');
+        };
 
-        $rows = [$headers];
-        foreach ($items as $item) {
-            $statusCell = $item['is_allotted']
-                ? '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>'
-                : $item['status'];
+        $existingSheetNames = [];
+        $sheets = [];
 
-            $rows[] = [
-                $item['serial'],
-                $item['holder_name'],
-                $item['pan_number'],
-                $item['rate'],
-                $statusCell,
+        if ($isAdmin) {
+            // Group applications by User
+            $userGroups = [];
+            foreach ($items as $item) {
+                $userGroups[$item['user_name']][] = $item;
+            }
+
+            // Sheet 1: All Applications
+            $allRows = [[
+                '<b>Serial No</b>',
+                '<b>User / Applicant</b>',
+                '<b>Name of PAN Holder</b>',
+                '<b>PAN Number</b>',
+                '<b>User Rate</b>',
+                '<b>Trader Rate</b>',
+                '<b>Diff Amount</b>',
+                '<b>Allotment Status</b>',
+            ]];
+
+            $totUser = 0; $totTrader = 0; $totDiff = 0; $totAllotted = 0;
+            foreach ($items as $item) {
+                $totUser += $item['user_rate'];
+                $totTrader += $item['trader_rate'];
+                $totDiff += $item['diff_amount'];
+                if ($item['is_allotted']) {
+                    $totAllotted++;
+                    $allRows[] = [
+                        '<style bgcolor="#FFFF00">' . $item['serial'] . '</style>',
+                        '<style bgcolor="#FFFF00">' . $item['user_name'] . '</style>',
+                        '<style bgcolor="#FFFF00">' . $item['holder_name'] . '</style>',
+                        '<style bgcolor="#FFFF00">' . $item['pan_number'] . '</style>',
+                        '<style bgcolor="#FFFF00">' . $formatRate($item['user_rate']) . '</style>',
+                        '<style bgcolor="#FFFF00">' . $formatRate($item['trader_rate']) . '</style>',
+                        '<style bgcolor="#FFFF00">' . $formatRate($item['diff_amount']) . '</style>',
+                        '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>',
+                    ];
+                } else {
+                    $allRows[] = [
+                        $item['serial'],
+                        $item['user_name'],
+                        $item['holder_name'],
+                        $item['pan_number'],
+                        $formatRate($item['user_rate']),
+                        $formatRate($item['trader_rate']),
+                        $formatRate($item['diff_amount']),
+                        $item['status'],
+                    ];
+                }
+            }
+
+            $allRows[] = [
+                '<b>TOTAL</b>',
+                '',
+                '',
+                '',
+                '<b>' . $formatRate($totUser) . '</b>',
+                '<b>' . $formatRate($totTrader) . '</b>',
+                '<b>' . $formatRate($totDiff) . '</b>',
+                '<b>Total: ' . count($items) . ' | Allotted: ' . $totAllotted . '</b>',
+            ];
+
+            $sheets[] = [
+                'name' => self::sanitizeSheetName('All Applications', $existingSheetNames),
+                'rows' => $allRows,
+            ];
+
+            // Sheet 2: Payout Summary (when multiple users are present)
+            if (count($userGroups) > 1) {
+                $summaryRows = [[
+                    '<b>Serial No</b>',
+                    '<b>User / Applicant</b>',
+                    '<b>Applications</b>',
+                    '<b>Allotted</b>',
+                    '<b>User Rate Total (Payout)</b>',
+                    '<b>Trader Rate Total</b>',
+                    '<b>Diff Amount Total (Profit)</b>',
+                ]];
+                $sumIdx = 1;
+                foreach ($userGroups as $uName => $uItems) {
+                    $uApps = count($uItems);
+                    $uAllotted = 0; $uUserTot = 0; $uTraderTot = 0; $uDiffTot = 0;
+                    foreach ($uItems as $ui) {
+                        if ($ui['is_allotted']) $uAllotted++;
+                        $uUserTot += $ui['user_rate'];
+                        $uTraderTot += $ui['trader_rate'];
+                        $uDiffTot += $ui['diff_amount'];
+                    }
+                    $allottedCell = $uAllotted > 0
+                        ? '<b><style bgcolor="#FFFF00">' . $uAllotted . '</style></b>'
+                        : (string) $uAllotted;
+
+                    $summaryRows[] = [
+                        $sumIdx++,
+                        $uName,
+                        $uApps,
+                        $allottedCell,
+                        $formatRate($uUserTot),
+                        $formatRate($uTraderTot),
+                        $formatRate($uDiffTot),
+                    ];
+                }
+                $summaryRows[] = [
+                    '<b>TOTAL</b>',
+                    '<b>' . count($userGroups) . ' Users</b>',
+                    '<b>' . count($items) . '</b>',
+                    '<b>' . $totAllotted . '</b>',
+                    '<b>' . $formatRate($totUser) . '</b>',
+                    '<b>' . $formatRate($totTrader) . '</b>',
+                    '<b>' . $formatRate($totDiff) . '</b>',
+                ];
+
+                $sheets[] = [
+                    'name' => self::sanitizeSheetName('Payout Summary', $existingSheetNames),
+                    'rows' => $summaryRows,
+                ];
+            }
+
+            // Sheets 3+: Individual User-Wise Sheets
+            foreach ($userGroups as $uName => $uItems) {
+                $userSheetName = self::sanitizeSheetName($uName, $existingSheetNames);
+                $userRows = [[
+                    '<b>Serial No</b>',
+                    '<b>Name of PAN Holder</b>',
+                    '<b>PAN Number</b>',
+                    '<b>User Rate</b>',
+                    '<b>Trader Rate</b>',
+                    '<b>Diff Amount</b>',
+                    '<b>Allotment Status</b>',
+                ]];
+
+                $uTotUser = 0; $uTotTrader = 0; $uTotDiff = 0; $uTotAllotted = 0;
+                $uSerial = 1;
+                foreach ($uItems as $ui) {
+                    $uTotUser += $ui['user_rate'];
+                    $uTotTrader += $ui['trader_rate'];
+                    $uTotDiff += $ui['diff_amount'];
+                    if ($ui['is_allotted']) {
+                        $uTotAllotted++;
+                        $userRows[] = [
+                            '<style bgcolor="#FFFF00">' . $uSerial++ . '</style>',
+                            '<style bgcolor="#FFFF00">' . $ui['holder_name'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $ui['pan_number'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($ui['user_rate']) . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($ui['trader_rate']) . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($ui['diff_amount']) . '</style>',
+                            '<b><style bgcolor="#FFFF00">' . $ui['status'] . '</style></b>',
+                        ];
+                    } else {
+                        $userRows[] = [
+                            $uSerial++,
+                            $ui['holder_name'],
+                            $ui['pan_number'],
+                            $formatRate($ui['user_rate']),
+                            $formatRate($ui['trader_rate']),
+                            $formatRate($ui['diff_amount']),
+                            $ui['status'],
+                        ];
+                    }
+                }
+
+                $userRows[] = [
+                    '<b>TOTAL</b>',
+                    '',
+                    '',
+                    '<b>' . $formatRate($uTotUser) . '</b>',
+                    '<b>' . $formatRate($uTotTrader) . '</b>',
+                    '<b>' . $formatRate($uTotDiff) . '</b>',
+                    '<b>Total: ' . count($uItems) . ' | Allotted: ' . $uTotAllotted . '</b>',
+                ];
+
+                $sheets[] = [
+                    'name' => $userSheetName,
+                    'rows' => $userRows,
+                ];
+            }
+        } else {
+            // Non-admin user: single sheet of their own applications
+            $userRows = [[
+                '<b>Serial No</b>',
+                '<b>Name of PAN Holder</b>',
+                '<b>PAN Number</b>',
+                '<b>Rate Applied</b>',
+                '<b>Allotment Status</b>',
+            ]];
+
+            $uTotUser = 0; $uTotAllotted = 0;
+            $uSerial = 1;
+            foreach ($items as $item) {
+                $uTotUser += $item['user_rate'];
+                if ($item['is_allotted']) {
+                    $uTotAllotted++;
+                    $userRows[] = [
+                        '<style bgcolor="#FFFF00">' . $uSerial++ . '</style>',
+                        '<style bgcolor="#FFFF00">' . $item['holder_name'] . '</style>',
+                        '<style bgcolor="#FFFF00">' . $item['pan_number'] . '</style>',
+                        '<style bgcolor="#FFFF00">' . $formatRate($item['user_rate']) . '</style>',
+                        '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>',
+                    ];
+                } else {
+                    $userRows[] = [
+                        $uSerial++,
+                        $item['holder_name'],
+                        $item['pan_number'],
+                        $formatRate($item['user_rate']),
+                        $item['status'],
+                    ];
+                }
+            }
+
+            $userRows[] = [
+                '<b>TOTAL</b>',
+                '',
+                '',
+                '<b>' . $formatRate($uTotUser) . '</b>',
+                '<b>Total: ' . count($items) . ' | Allotted: ' . $uTotAllotted . '</b>',
+            ];
+
+            $sheets[] = [
+                'name' => self::sanitizeSheetName('My Rates', $existingSheetNames),
+                'rows' => $userRows,
             ];
         }
 
@@ -331,35 +614,96 @@ class CsvExportService
             AuditService::log('excel_exported', $ipo, null, [
                 'type' => 'user_rates_excel',
                 'records_count' => count($items),
-            ], "Exported user rates Excel for {$ipo->company_name}");
+                'sheets_count' => count($sheets),
+            ], "Exported user rates multi-sheet Excel for {$ipo->company_name}");
         }
 
-        return self::buildExcelStreamResponse($filename, $rows);
+        return self::buildMultiSheetExcelStreamResponse($filename, $sheets);
     }
 
     /**
-     * Export User Rates CSV with Allotment Status column.
+     * Export User Rates CSV with Allotment Status, Trader Rate, Diff Amount, and Totals.
      */
-    public static function exportUserCsv(?Ipo $ipo = null, ?int $userId = null): StreamedResponse
+    public static function exportUserCsv(?Ipo $ipo = null, ?int $userId = null, bool $isAdmin = true): StreamedResponse
     {
         $items = self::getUserRatesData($ipo, $userId);
 
-        $headers = [
-            'Serial No',
-            'Name of PAN Holder',
-            'PAN Number',
-            'Rate Applied',
-            'Allotment Status',
-        ];
+        $formatRate = static function (float $num): string {
+            return (float) $num == (int) $num ? (string) (int) $num : number_format($num, 2, '.', '');
+        };
 
-        $rows = [];
-        foreach ($items as $item) {
+        if ($isAdmin) {
+            $headers = [
+                'Serial No',
+                'User / Applicant',
+                'Name of PAN Holder',
+                'PAN Number',
+                'User Rate',
+                'Trader Rate',
+                'Diff Amount',
+                'Allotment Status',
+            ];
+
+            $rows = [];
+            $totUser = 0; $totTrader = 0; $totDiff = 0; $totAllotted = 0;
+            foreach ($items as $item) {
+                $totUser += $item['user_rate'];
+                $totTrader += $item['trader_rate'];
+                $totDiff += $item['diff_amount'];
+                if ($item['is_allotted']) $totAllotted++;
+
+                $rows[] = [
+                    $item['serial'],
+                    $item['user_name'],
+                    $item['holder_name'],
+                    $item['pan_number'],
+                    $formatRate($item['user_rate']),
+                    $formatRate($item['trader_rate']),
+                    $formatRate($item['diff_amount']),
+                    $item['status'],
+                ];
+            }
+
             $rows[] = [
-                $item['serial'],
-                $item['holder_name'],
-                $item['pan_number'],
-                $item['rate'],
-                $item['status'],
+                'TOTAL',
+                '',
+                '',
+                '',
+                $formatRate($totUser),
+                $formatRate($totTrader),
+                $formatRate($totDiff),
+                'Total: ' . count($items) . ' | Allotted: ' . $totAllotted,
+            ];
+        } else {
+            $headers = [
+                'Serial No',
+                'Name of PAN Holder',
+                'PAN Number',
+                'Rate Applied',
+                'Allotment Status',
+            ];
+
+            $rows = [];
+            $totUser = 0; $totAllotted = 0;
+            foreach ($items as $item) {
+                $totUser += $item['user_rate'];
+                if ($item['is_allotted']) $totAllotted++;
+
+                $rows[] = [
+                    $item['serial'],
+                    $item['holder_name'],
+                    $item['pan_number'],
+                    $formatRate($item['user_rate']),
+                    $item['status'],
+                ];
+            }
+
+            $rows[] = [
+                'TOTAL',
+                '',
+                '',
+                $formatRate($totUser),
+                'Total: ' . count($items) . ' | Allotted: ' . $totAllotted,
             ];
         }
 
@@ -480,20 +824,42 @@ class CsvExportService
             '<b>Allotment Status</b>',
         ];
 
-        $rows = [$headers];
-        foreach ($items as $item) {
-            $statusCell = $item['is_allotted']
-                ? '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>'
-                : $item['status'];
+        $formatRate = static function (float $num): string {
+            return (float) $num == (int) $num ? (string) (int) $num : number_format($num, 2, '.', '');
+        };
 
-            $rows[] = [
-                $item['serial'],
-                $item['holder_name'],
-                $item['pan_number'],
-                $item['rate'],
-                $statusCell,
-            ];
+        $rows = [$headers];
+        $totTrader = 0; $totAllotted = 0;
+        foreach ($items as $item) {
+            $numericRate = (float) $item['rate'];
+            $totTrader += $numericRate;
+            if ($item['is_allotted']) {
+                $totAllotted++;
+                $rows[] = [
+                    '<style bgcolor="#FFFF00">' . $item['serial'] . '</style>',
+                    '<style bgcolor="#FFFF00">' . $item['holder_name'] . '</style>',
+                    '<style bgcolor="#FFFF00">' . $item['pan_number'] . '</style>',
+                    '<style bgcolor="#FFFF00">' . $item['rate'] . '</style>',
+                    '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>',
+                ];
+            } else {
+                $rows[] = [
+                    $item['serial'],
+                    $item['holder_name'],
+                    $item['pan_number'],
+                    $item['rate'],
+                    $item['status'],
+                ];
+            }
         }
+
+        $rows[] = [
+            '<b>TOTAL</b>',
+            '',
+            '',
+            '<b>' . $formatRate($totTrader) . '</b>',
+            '<b>Total: ' . count($items) . ' | Allotted: ' . $totAllotted . '</b>',
+        ];
 
         $name = $ipo ? preg_replace('/[^a-zA-Z0-9_\-]/', '_', $ipo->company_name) : 'All_IPOs';
         $filename = "{$name}_trader_rates_".date('Y-m-d_His').'.xlsx';
@@ -515,6 +881,10 @@ class CsvExportService
     {
         $items = self::getTraderRatesData($ipo, $userId);
 
+        $formatRate = static function (float $num): string {
+            return (float) $num == (int) $num ? (string) (int) $num : number_format($num, 2, '.', '');
+        };
+
         $headers = [
             'Serial No',
             'Name of PAN Holder',
@@ -524,7 +894,12 @@ class CsvExportService
         ];
 
         $rows = [];
+        $totTrader = 0; $totAllotted = 0;
         foreach ($items as $item) {
+            $numericRate = (float) $item['rate'];
+            $totTrader += $numericRate;
+            if ($item['is_allotted']) $totAllotted++;
+
             $rows[] = [
                 $item['serial'],
                 $item['holder_name'],
@@ -533,6 +908,14 @@ class CsvExportService
                 $item['status'],
             ];
         }
+
+        $rows[] = [
+            'TOTAL',
+            '',
+            '',
+            $formatRate($totTrader),
+            'Total: ' . count($items) . ' | Allotted: ' . $totAllotted,
+        ];
 
         $name = $ipo ? preg_replace('/[^a-zA-Z0-9_\-]/', '_', $ipo->company_name) : 'All_IPOs';
         $filename = "{$name}_trader_rates_".date('Y-m-d_His').'.csv';

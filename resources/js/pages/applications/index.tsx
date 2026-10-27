@@ -574,10 +574,10 @@ export default function ApplicationsIndex({
                                         <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
                                         <div className="flex flex-col flex-1 leading-tight">
                                             <span className="font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
-                                                User Rates (Excel)
-                                                <span className="inline-block w-2 h-2 rounded-full bg-amber-400 ring-2 ring-amber-200" title="Yellow highlighted for allotted" />
+                                                User Payouts (Excel)
+                                                <span className="inline-block w-2 h-2 rounded-full bg-amber-400 ring-2 ring-amber-200" title="User sheets, diffs & yellow highlight" />
                                             </span>
-                                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">Yellow highlight on allotted</span>
+                                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">User sheets, diffs, totals & yellow</span>
                                         </div>
                                     </a>
                                 </DropdownMenuItem>

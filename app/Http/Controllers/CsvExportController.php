@@ -35,13 +35,14 @@ class CsvExportController extends Controller
     public function exportUserCsv(Request $request, Ipo $ipo): StreamedResponse
     {
         $user = $request->user();
-        $targetUserId = $user->isAdmin() ? $request->input('user_id') : $user->id;
+        $isAdmin = $user->isAdmin();
+        $targetUserId = $isAdmin ? $request->input('user_id') : $user->id;
 
         if (in_array(strtolower((string) $request->query('format')), ['excel', 'xlsx'])) {
-            return CsvExportService::exportUserExcel($ipo, $targetUserId ? (int) $targetUserId : null);
+            return CsvExportService::exportUserExcel($ipo, $targetUserId ? (int) $targetUserId : null, $isAdmin);
         }
 
-        return CsvExportService::exportUserCsv($ipo, $targetUserId ? (int) $targetUserId : null);
+        return CsvExportService::exportUserCsv($ipo, $targetUserId ? (int) $targetUserId : null, $isAdmin);
     }
 
     /**
@@ -50,9 +51,10 @@ class CsvExportController extends Controller
     public function exportUserExcel(Request $request, Ipo $ipo): StreamedResponse
     {
         $user = $request->user();
-        $targetUserId = $user->isAdmin() ? $request->input('user_id') : $user->id;
+        $isAdmin = $user->isAdmin();
+        $targetUserId = $isAdmin ? $request->input('user_id') : $user->id;
 
-        return CsvExportService::exportUserExcel($ipo, $targetUserId ? (int) $targetUserId : null);
+        return CsvExportService::exportUserExcel($ipo, $targetUserId ? (int) $targetUserId : null, $isAdmin);
     }
 
     /**
@@ -98,13 +100,14 @@ class CsvExportController extends Controller
     public function exportAllUserCsv(Request $request): StreamedResponse
     {
         $user = $request->user();
-        $targetUserId = $user->isAdmin() ? $request->input('user_id') : $user->id;
+        $isAdmin = $user->isAdmin();
+        $targetUserId = $isAdmin ? $request->input('user_id') : $user->id;
 
         if (in_array(strtolower((string) $request->query('format')), ['excel', 'xlsx'])) {
-            return CsvExportService::exportUserExcel(null, $targetUserId ? (int) $targetUserId : null);
+            return CsvExportService::exportUserExcel(null, $targetUserId ? (int) $targetUserId : null, $isAdmin);
         }
 
-        return CsvExportService::exportUserCsv(null, $targetUserId ? (int) $targetUserId : null);
+        return CsvExportService::exportUserCsv(null, $targetUserId ? (int) $targetUserId : null, $isAdmin);
     }
 
     /**
@@ -113,9 +116,10 @@ class CsvExportController extends Controller
     public function exportAllUserExcel(Request $request): StreamedResponse
     {
         $user = $request->user();
-        $targetUserId = $user->isAdmin() ? $request->input('user_id') : $user->id;
+        $isAdmin = $user->isAdmin();
+        $targetUserId = $isAdmin ? $request->input('user_id') : $user->id;
 
-        return CsvExportService::exportUserExcel(null, $targetUserId ? (int) $targetUserId : null);
+        return CsvExportService::exportUserExcel(null, $targetUserId ? (int) $targetUserId : null, $isAdmin);
     }
 
     /**
