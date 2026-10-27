@@ -246,11 +246,20 @@ export default function EditApplicationModal({
             payload.override_published_rate = Number(overridePublishedRate);
         } else {
             payload.profit_sharing_value = Number(profitSharingValue);
+            if (profitSharingType === 'fix') {
+                payload.fix_profit_per_lot = Number(profitSharingValue);
+            }
         }
 
         router.put(`/applications/${batch.id}`, payload, {
             preserveScroll: true,
-            onSuccess: () => {
+            onSuccess: (page: any) => {
+                const flashErr = page?.props?.flash?.error;
+                if (flashErr) {
+                    setIsSubmitting(false);
+                    setErrorMessage(flashErr);
+                    return;
+                }
                 setIsSubmitting(false);
                 onClose();
             },

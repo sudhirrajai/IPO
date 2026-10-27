@@ -391,3 +391,61 @@ test('admin can update application bank account and UPI from saved selections', 
         ->and((float) $batch->profit_sharing_value)->toBe(30.0);
 });
 
+test('admin can update fixed rate on an allotted and settled application and payouts sync', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $user = User::factory()->create(['role' => 'user']);
+
+    $ipo = Ipo::create([
+        'company_name' => 'Jio Payments Ltd',
+        'symbol' => 'JIO',
+        'exchange' => 'NSE',
+        'lot_size' => 12,
+        'issue_price' => 100,
+        'gmp' => 240,
+        'status' => 'allotment_out',
+    ]);
+
+    $batch = ApplicationBatch::create([
+        'user_id' => $user->id,
+        'ipo_id' => $ipo->id,
+        'batch_number' => 'BATCH-TEST-ALLOTTED',
+        'pan_number' => 'ABCDE1234F',
+        'applicant_name' => 'Krutarth Patel',
+        'application_count' => 1,
+        'profit_sharing_type' => 'fix',
+        'profit_sharing_value' => 1000.0,
+        'expected_gross_profit' => 2880.0, // 12 * 240
+        'expected_user_payout' => 1000.0,
+        'expected_net_earnings' => 1880.0,
+        'settled_gross_profit' => 2880.0,
+        'settled_user_payout' => 1000.0,
+        'settled_net_earnings' => 1880.0,
+        'capital_amount' => 1200.0,
+        'capital_returned' => 1200.0,
+        'funding_source' => 'my_money',
+        'application_status' => 'allotted',
+        'settlement_status' => 'settled',
+    ]);
+
+    // Admin edits fixed rate from 1000 to 1200
+    $response = $this->actingAs($admin)->put("/applications/{$batch->id}", [
+        'profit_sharing_type' => 'fix',
+        'profit_sharing_value' => 1200.0,
+        'application_count' => 1,
+        'funding_source' => 'my_money',
+    ]);
+
+    $response->assertSessionHasNoErrors();
+    $response->assertSessionMissing('error');
+
+    $batch->refresh();
+
+    // Verify rate, expected payout and settled payout were all updated in sync
+    expect((float) $batch->profit_sharing_value)->toBe(1200.0)
+        ->and((float) $batch->expected_user_payout)->toBe(1200.0)
+        ->and((float) $batch->expected_net_earnings)->toBe(1680.0) // 2880 - 1200
+        ->and((float) $batch->settled_user_payout)->toBe(1200.0)
+        ->and((float) $batch->settled_net_earnings)->toBe(1680.0);
+});
+
+

@@ -432,8 +432,8 @@ class ApplicationBatchService
             'margin_snapshot' => $margin,
         ];
 
-        // If batch was already marked allotted, keep settled values in sync with new rates
-        if ($batch->application_status === 'allotted') {
+        // If batch was already marked allotted or settled, keep settled values in sync with new rates
+        if ($batch->application_status === 'allotted' || $batch->settlement_status === 'settled') {
             $updateFields['settled_gross_profit'] = $grossProfit;
             $updateFields['settled_user_payout'] = $userPayout;
             $updateFields['settled_net_earnings'] = $netEarnings;

@@ -268,9 +268,8 @@ class ApplicationBatchController extends Controller
             abort(403, 'Only administrators are authorized to edit applications, rates, and PANs.');
         }
 
-        if ($batch->settlement_status === 'settled') {
-            return back()->with('error', 'Cannot edit an application that has already been settled.');
-        }
+        // Administrators can edit applications, rates, and PANs even after allotment or settlement
+        // ApplicationBatchService::updateBatch will keep settled earnings and user payouts in sync.
 
         $validated = $request->validate([
             'applicant_name' => 'nullable|string|max:150',
@@ -295,8 +294,12 @@ class ApplicationBatchController extends Controller
         $lots = $validated['lots'] ?? $validated['application_count'] ?? $batch->application_count ?? 1;
         $validated['application_count'] = (int) $lots;
 
-        if (($validated['profit_sharing_type'] ?? '') === 'fix' && isset($validated['fix_profit_per_lot'])) {
-            $validated['profit_sharing_value'] = (float) $validated['fix_profit_per_lot'];
+        if (($validated['profit_sharing_type'] ?? '') === 'fix') {
+            if (isset($validated['fix_profit_per_lot'])) {
+                $validated['profit_sharing_value'] = (float) $validated['fix_profit_per_lot'];
+            } elseif (isset($validated['profit_sharing_value'])) {
+                $validated['profit_sharing_value'] = (float) $validated['profit_sharing_value'];
+            }
         }
 
         if (isset($validated['trader_rate']) && ! isset($validated['override_trader_rate'])) {

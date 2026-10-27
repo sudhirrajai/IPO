@@ -155,11 +155,11 @@ class CsvExportAndApprovalTest extends TestCase
         $userCsvContent = $userCsvResponse->streamedContent();
 
         // Check columns
-        $this->assertStringContainsString('"Serial No","Name of PAN Holder","PAN Number","Rate Applied"', $userCsvContent);
-        // Row 1: Serial 1, User One, ABCDE1111A, 1100
-        $this->assertStringContainsString('1,"User One",ABCDE1111A,1100', $userCsvContent);
-        // Row 2: Serial 2, User Two, FGHIJ2222B, 1300
-        $this->assertStringContainsString('2,"User Two",FGHIJ2222B,1300', $userCsvContent);
+        $this->assertStringContainsString('"Serial No","User / Applicant","Name of PAN Holder","PAN Number","User Rate","Trader Rate","Diff Amount","Allotment Status"', $userCsvContent);
+        // Row 1: Serial 1, User One, ABCDE1111A, 1100, 1300, 200
+        $this->assertStringContainsString("1,\"{$this->user->name}\",\"User One\",ABCDE1111A,1100,1300,200", $userCsvContent);
+        // Row 2: Serial 2, User Two, FGHIJ2222B, 1300, 1500, 200
+        $this->assertStringContainsString("2,\"{$this->user->name}\",\"User Two\",FGHIJ2222B,1300,1500,200", $userCsvContent);
 
         // 2. Test Trader Rates CSV
         $traderCsvResponse = $this->actingAs($this->admin)->get(route('ipos.export.trader-csv', $this->ipo));
