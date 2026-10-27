@@ -64,7 +64,18 @@ class BseAllotmentService
                 }
             }
         } catch (Exception $e) {
-            Log::warning('Failed to fetch BSE active IPO list: ' . $e->getMessage());
+            Log::warning('Failed to fetch BSE active IPO list via HTTP: ' . $e->getMessage());
+        }
+
+        // Headless Chrome fallback if HTTP request is blocked by BSE Akamai/WAF
+        $scraperOutput = self::executeScraper('list');
+        if (! empty($scraperOutput) && preg_match('/RESULT_START\s*([\s\S]*?)\s*RESULT_END/', $scraperOutput, $matches)) {
+            $data = json_decode(trim($matches[1]), true);
+            $table = $data['table'] ?? [];
+            if (is_array($table) && count($table) > 0) {
+                Cache::put(self::CACHE_KEY_IPOS, $table, now()->addMinutes(30));
+                return $table;
+            }
         }
 
         return [];
@@ -92,7 +103,7 @@ class BseAllotmentService
             }
         }
 
-        // 2. Fuzzy name match
+        // 2. Direct substring match
         if (! empty($name)) {
             foreach ($ipos as $item) {
                 $bseName = strtolower(trim($item['IPOName'] ?? ''));
@@ -102,7 +113,28 @@ class BseAllotmentService
             }
         }
 
-        return null;
+        // 3. Intelligent token-based keyword match
+        $localTokens = KfintechAllotmentService::extractKeywords($ipo->company_name ?? '');
+        $bestMatchId = null;
+        $bestScore = 0.0;
+
+        foreach ($ipos as $item) {
+            $bseName = $item['IPOName'] ?? '';
+            $bseTokens = KfintechAllotmentService::extractKeywords($bseName);
+
+            $common = array_intersect($localTokens, $bseTokens);
+            $countCommon = count($common);
+
+            if ($countCommon > 0) {
+                $score = ($countCommon / max(count($localTokens), 1)) * 100;
+                if ($score > $bestScore && $score >= 50.0) {
+                    $bestScore = $score;
+                    $bestMatchId = (string) $item['IM_ID'];
+                }
+            }
+        }
+
+        return $bestMatchId;
     }
 
     /**
@@ -151,6 +183,8 @@ class BseAllotmentService
             ];
         }
 
+        $data = null;
+
         try {
             $response = Http::withHeaders(self::getHeaders())
                 ->timeout(12)
@@ -160,28 +194,42 @@ class BseAllotmentService
                     'panNo' => $pan,
                 ]);
 
-            if (! $response->successful()) {
-                return [
-                    'success' => false,
-                    'status' => 'http_error',
-                    'found' => false,
-                    'message' => 'BSE API returned HTTP error ' . $response->status(),
-                    'allotted' => false,
-                    'all_shares' => 0,
-                    'app_shares' => 0,
-                    'application_number' => null,
-                    'order_number' => null,
-                    'upi_amount' => null,
-                    'upi_status' => null,
-                    'allotment_price' => null,
-                    'symbol' => null,
-                    'pan' => $pan,
-                    'provider' => 'bse',
-                ];
+            if ($response->successful()) {
+                $data = $response->json();
             }
+        } catch (Exception $e) {
+            Log::warning('BSE allotment check HTTP request failed: ' . $e->getMessage());
+        }
 
-            $data = $response->json();
-            $table = $data['Table'] ?? [];
+        // Headless Chrome fallback if HTTP request is blocked by BSE Akamai/WAF
+        if ($data === null) {
+            $scraperOutput = self::executeScraper('query', $imId, $pan, $appNo);
+            if (! empty($scraperOutput) && preg_match('/RESULT_START\s*([\s\S]*?)\s*RESULT_END/', $scraperOutput, $matches)) {
+                $data = json_decode(trim($matches[1]), true);
+            }
+        }
+
+        if ($data === null || ! is_array($data)) {
+            return [
+                'success' => false,
+                'status' => 'http_error',
+                'found' => false,
+                'message' => 'Unable to reach BSE allotment verification service (WAF blocked).',
+                'allotted' => false,
+                'all_shares' => 0,
+                'app_shares' => 0,
+                'application_number' => null,
+                'order_number' => null,
+                'upi_amount' => null,
+                'upi_status' => null,
+                'allotment_price' => null,
+                'symbol' => null,
+                'pan' => $pan,
+                'provider' => 'bse',
+            ];
+        }
+
+        $table = $data['Table'] ?? [];
 
             if (empty($table) || ! is_array($table)) {
                 return [
@@ -369,5 +417,65 @@ class BseAllotmentService
 
         $result['ipo_name'] = $ipo->company_name;
         return $result;
+    }
+
+    /**
+     * Execute headless BSE scraper process with fallbacks for restricted environments.
+     */
+    private static function executeScraper(string $action, ?string $imId = null, ?string $pan = null, ?string $appNo = null): ?string
+    {
+        $base = base_path();
+        $script = base_path('scripts/bse_scraper.mjs');
+        if (! file_exists($script)) {
+            return null;
+        }
+
+        $args = ['node', 'scripts/bse_scraper.mjs', $action];
+        if ($imId !== null) $args[] = $imId;
+        if ($pan !== null) $args[] = $pan;
+        if ($appNo !== null) $args[] = $appNo;
+
+        $disabled = array_map('trim', explode(',', (string) ini_get('disable_functions')));
+
+        // 1. Try Laravel Process (requires proc_open)
+        if (function_exists('proc_open') && ! in_array('proc_open', $disabled, true)) {
+            try {
+                $res = \Illuminate\Support\Facades\Process::path($base)->timeout(45)->run($args);
+                return $res->output();
+            } catch (\Throwable $e) {
+                Log::warning('proc_open runner failed for BSE scraper, attempting exec fallback: ' . $e->getMessage());
+            }
+        }
+
+        // 2. Try exec()
+        if (function_exists('exec') && ! in_array('exec', $disabled, true)) {
+            try {
+                $escapedArgs = array_map('escapeshellarg', array_slice($args, 1));
+                $cmd = "node " . implode(' ', $escapedArgs) . " 2>&1";
+                $lines = [];
+                @exec($cmd, $lines);
+                if (! empty($lines)) {
+                    return implode("\n", $lines);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('exec runner failed for BSE scraper: ' . $e->getMessage());
+            }
+        }
+
+        // 3. Try shell_exec()
+        if (function_exists('shell_exec') && ! in_array('shell_exec', $disabled, true)) {
+            try {
+                $escapedArgs = array_map('escapeshellarg', array_slice($args, 1));
+                $cmd = "node " . implode(' ', $escapedArgs) . " 2>&1";
+                $out = @shell_exec($cmd);
+                if ($out !== null && $out !== false) {
+                    return $out;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('shell_exec runner failed for BSE scraper: ' . $e->getMessage());
+            }
+        }
+
+        return null;
     }
 }
