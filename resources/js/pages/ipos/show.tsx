@@ -61,6 +61,12 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -1728,23 +1734,20 @@ export default function IpoShow({
                     ).length;
 
                     const renderBatchesTable = (batchList: ApplicationBatch[]) => (
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800">
                             <table className="w-full text-left text-sm">
-                                <thead className="border-b border-neutral-200 text-xs font-semibold uppercase text-neutral-500 dark:border-neutral-800">
+                                <thead className="bg-neutral-50/80 dark:bg-neutral-900/80 border-b border-neutral-200 text-[11px] font-semibold uppercase tracking-wider text-neutral-500 dark:border-neutral-800">
                                     <tr>
-                                        <th className="py-3 px-3 w-12 text-center">#</th>
-                                        <th className="py-3 px-3">Applicant & Batch</th>
-                                        <th className="py-3 px-3">Bank</th>
-                                        <th className="py-3 px-3">PAN & UPI</th>
-                                        <th className="py-3 px-3">IPO Amount</th>
-                                        <th className="py-3 px-3">Current GMP</th>
-                                        <th className="py-3 px-3">Profit Sharing</th>
-                                        <th className="py-3 px-3">Est. Payout / Net</th>
-                                        <th className="py-3 px-3">Status</th>
+                                        <th className="py-3 px-3 w-10 text-center">#</th>
+                                        <th className="py-3 px-3 min-w-[180px]">Applicant & PAN</th>
+                                        <th className="py-3 px-3 min-w-[160px]">Bank & UPI</th>
+                                        <th className="py-3 px-3">Lots & Shares</th>
+                                        <th className="py-3 px-3">Rate & Payout</th>
+                                        <th className="py-3 px-3 min-w-[140px]">Allotment Status</th>
                                         <th className="py-3 px-3 text-right">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                                <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800 bg-white dark:bg-neutral-950">
                                     {batchList.map((batch, index) => {
                                         const pans = batch.batch_pans || [];
                                         const panNumberRaw = batch.pan_number || (pans[0]?.pan_number_snapshot ?? '');
@@ -1783,50 +1786,29 @@ export default function IpoShow({
                                                 className={`transition-colors ${
                                                     isBatchAllotmentToday
                                                         ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50/70 border-l-4 border-l-amber-500'
-                                                        : 'hover:bg-neutral-50/50 dark:hover:bg-neutral-900/50'
+                                                        : isAllotted
+                                                        ? 'bg-emerald-50/20 dark:bg-emerald-950/10 hover:bg-emerald-50/40'
+                                                        : 'hover:bg-neutral-50/60 dark:hover:bg-neutral-900/50'
                                                 }`}
                                             >
-                                                <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold">
+                                                {/* 1. Index */}
+                                                <td className="py-3 px-3 text-center text-xs font-mono text-neutral-400 dark:text-neutral-500 font-semibold align-top">
                                                     {index + 1}
                                                 </td>
-                                                <td className="py-3 px-3">
-                                                    <span className="font-semibold block text-neutral-900 dark:text-neutral-100">
+
+                                                {/* 2. Applicant & PAN */}
+                                                <td className="py-3 px-3 align-top">
+                                                    <span className="font-semibold block text-neutral-900 dark:text-neutral-100 text-sm leading-snug">
                                                         {batch.batch_pans?.[0]?.user_pan?.account_holder_name || batch.applicant_name || batch.user?.name || 'Applicant'}
                                                     </span>
-                                                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                                        <span className="font-mono text-[11px] text-neutral-400">
-                                                            {batch.batch_number} · {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
-                                                        </span>
-                                                        {isBatchAllotmentToday ? (
-                                                            <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-4">
-                                                                <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Allotment Today
-                                                            </Badge>
-                                                        ) : hasAllotmentDate ? (
-                                                            <span className="text-[10px] text-neutral-400 font-sans">
-                                                                Allotment: {formatIstDate(allotmentDateStr)}
-                                                            </span>
-                                                        ) : null}
-                                                    </div>
-                                                </td>
-                                                <td className="py-3 px-3">
-                                                    {batch.bank_name ? (
-                                                        <span className="inline-flex items-center gap-1 font-medium text-xs text-neutral-700 dark:text-neutral-300">
-                                                            <Landmark className="h-3.5 w-3.5 text-blue-500" />
-                                                            {batch.bank_name}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-xs text-neutral-400">—</span>
-                                                    )}
-                                                </td>
-                                                <td className="py-3 px-3">
-                                                    <div className="flex items-center gap-1.5 font-mono text-xs font-medium text-neutral-800 dark:text-neutral-200">
+                                                    <div className="flex items-center gap-1.5 mt-1 font-mono text-xs text-neutral-600 dark:text-neutral-300">
                                                         <span>{panDisplay}</span>
                                                         {isAdmin && panNumberRaw && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => copyPan(panNumberRaw)}
                                                                 className="text-neutral-400 hover:text-blue-600 transition-colors"
-                                                                title="Copy unmasked PAN"
+                                                                title="Copy PAN"
                                                             >
                                                                 {copiedPan === panNumberRaw ? (
                                                                     <CheckCheck className="h-3 w-3 text-emerald-600" />
@@ -1836,125 +1818,195 @@ export default function IpoShow({
                                                             </button>
                                                         )}
                                                     </div>
-                                                    {batch.upi_id ? (
-                                                        <div className="flex items-center gap-1.5 mt-0.5">
-                                                            <span className="text-[11px] font-mono text-neutral-600 dark:text-neutral-400 block truncate max-w-[130px]" title={batch.upi_id}>
+                                                    <div className="flex items-center gap-1 mt-1 text-[11px] text-neutral-400 font-mono">
+                                                        <span>{batch.batch_number}</span>
+                                                        <span>·</span>
+                                                        <span className={batch.funding_source === 'my_money' ? 'text-indigo-600 dark:text-indigo-400 font-sans font-medium' : 'text-neutral-500 font-sans'}>
+                                                            {batch.funding_source === 'my_money' ? 'My Capital' : 'User Capital'}
+                                                        </span>
+                                                        {isBatchAllotmentToday && (
+                                                            <Badge className="ml-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-1 py-0 h-3.5 leading-none">
+                                                                <Sparkles className="h-2 w-2 mr-0.5" /> Today
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                </td>
+
+                                                {/* 3. Bank & UPI */}
+                                                <td className="py-3 px-3 align-top">
+                                                    {batch.bank_name ? (
+                                                        <div className="inline-flex items-center gap-1.5 font-medium text-xs text-neutral-800 dark:text-neutral-200">
+                                                            <Landmark className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                                                            <span className="truncate max-w-[140px]" title={batch.bank_name}>{batch.bank_name}</span>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-xs text-neutral-400">—</span>
+                                                    )}
+                                                    {batch.upi_id && (
+                                                        <div className="flex items-center gap-1.5 mt-1">
+                                                            <span className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400 truncate max-w-[120px]" title={batch.upi_id}>
                                                                 {batch.upi_id}
                                                             </span>
                                                             {batch.upi_app && (
-                                                                <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 border font-medium ${getUpiAppBadgeClass(batch.upi_app)}`}>
+                                                                <Badge variant="outline" className={`text-[9px] px-1 py-0 h-3.5 border font-medium ${getUpiAppBadgeClass(batch.upi_app)}`}>
                                                                     {batch.upi_app}
                                                                 </Badge>
                                                             )}
                                                         </div>
-                                                    ) : (
-                                                        <span className="text-[11px] text-neutral-400 block">—</span>
                                                     )}
                                                 </td>
-                                                <td className="py-3 px-3">
-                                                    <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                                                        {formatInr(appAmount)}
+
+                                                {/* 4. Lots & Shares */}
+                                                <td className="py-3 px-3 align-top whitespace-nowrap">
+                                                    <span className="font-semibold text-neutral-900 dark:text-neutral-100 text-xs block">
+                                                        {batch.application_count} lot{batch.application_count > 1 ? 's' : ''}
                                                     </span>
-                                                    <span className="text-[11px] text-neutral-400 block">
-                                                        {batch.application_count} lot(s) ({batch.application_count * (ipo.lot_size || 1)} sh)
+                                                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400 block mt-0.5">
+                                                        {batch.application_count * (ipo.lot_size || 1)} shares
                                                     </span>
-                                                </td>
-                                                <td className="py-3 px-3 font-semibold text-emerald-600">
-                                                    ₹{batch.gmp_snapshot || ipo.gmp || 0}
-                                                </td>
-                                                <td className="py-3 px-3">
-                                                    {batch.profit_sharing_type === 'percentage' ? (
-                                                        <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200">
-                                                            {batch.profit_sharing_value}% of Listing Gain
-                                                        </Badge>
-                                                    ) : batch.profit_sharing_type === 'fix' ? (
-                                                        <Badge variant="secondary" className="text-[10px] bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200">
-                                                            Fixed ₹{batch.profit_sharing_value || batch.expected_user_payout}
-                                                        </Badge>
-                                                    ) : (
-                                                        <Badge variant="outline" className="text-[10px]">
-                                                            Rate ₹{batch.published_rate_snapshot}
-                                                        </Badge>
+                                                    {appAmount > 0 && (
+                                                        <span className="text-[10px] text-neutral-400 block mt-0.5">
+                                                            {formatInr(appAmount)}
+                                                        </span>
                                                     )}
                                                 </td>
-                                                <td className="py-3 px-3">
-                                                    <span className="font-medium text-emerald-600 dark:text-emerald-400 block">
-                                                        {isAdmin ? 'Payout: ' : 'Your Payout: '}
-                                                        {formatInr(isAllotted ? (batch.settled_user_payout ?? batch.expected_user_payout) : isNotAllotted ? 0 : batch.expected_user_payout)}
-                                                    </span>
+
+                                                {/* 5. Rate & Payout */}
+                                                <td className="py-3 px-3 align-top whitespace-nowrap">
+                                                    <div>
+                                                        {batch.profit_sharing_type === 'percentage' ? (
+                                                            <Badge variant="secondary" className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200">
+                                                                {batch.profit_sharing_value}% Gain
+                                                            </Badge>
+                                                        ) : batch.profit_sharing_type === 'fix' ? (
+                                                            <Badge variant="secondary" className="text-[10px] bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border border-purple-200">
+                                                                Fixed ₹{batch.profit_sharing_value || batch.expected_user_payout}
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="text-[10px] bg-neutral-50 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700">
+                                                                Rate ₹{batch.published_rate_snapshot || 0}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="mt-1">
+                                                        {isAllotted ? (
+                                                            <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400 block">
+                                                                Payout: {formatInr(batch.settled_user_payout ?? batch.expected_user_payout)}
+                                                            </span>
+                                                        ) : isNotAllotted ? (
+                                                            <span className="text-xs text-neutral-400 block">Payout: ₹0</span>
+                                                        ) : (
+                                                            <span className="text-xs font-medium text-amber-600 dark:text-amber-400 block">
+                                                                Est: {formatInr(batch.expected_user_payout)}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     {isAdmin && (
-                                                        <span className="text-[11px] text-neutral-400 block">
+                                                        <span className="text-[10px] text-neutral-400 block mt-0.5">
                                                             Admin Net: {formatInr(isAllotted ? (batch.settled_net_earnings ?? batch.expected_net_earnings) : isNotAllotted ? 0 : batch.expected_net_earnings)}
                                                         </span>
                                                     )}
-                                                    {!isAdmin && isPending && (
-                                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 block">
-                                                            Finalized Listing + T+1
-                                                        </span>
+                                                </td>
+
+                                                {/* 6. Allotment Status */}
+                                                <td className="py-3 px-3 align-top min-w-[130px]">
+                                                    {batch.allotment_details?.checking || checkingBatchIds[batch.id] ? (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="text-[10px] font-semibold border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 animate-pulse inline-flex items-center gap-1"
+                                                        >
+                                                            <Loader2 className="h-3 w-3 animate-spin text-amber-600" /> Checking...
+                                                        </Badge>
+                                                    ) : isAllotted ? (
+                                                        <div className="space-y-1">
+                                                            <Badge className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800 inline-flex items-center gap-1">
+                                                                <CheckCircle2 className="h-3 w-3 text-emerald-600 shrink-0" />
+                                                                Allotted ({batch.allotment_details?.allotted_shares || batch.application_count * (ipo.lot_size || 1)} sh)
+                                                            </Badge>
+                                                            {!hasAutoCheckResult && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleStatusChange(batch.id, 'ready')}
+                                                                    className="block text-[10px] text-neutral-400 hover:text-neutral-600 underline"
+                                                                    title="Re-open status"
+                                                                >
+                                                                    Undo
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : isNotAllotted ? (
+                                                        <div className="space-y-1">
+                                                            <Badge
+                                                                variant="outline"
+                                                                className="text-[10px] font-medium border-rose-200 bg-rose-50/80 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300 dark:border-rose-900/60 inline-flex items-center gap-1"
+                                                            >
+                                                                <X className="h-3 w-3 text-rose-500 shrink-0" /> Not Allotted
+                                                            </Badge>
+                                                            {!hasAutoCheckResult && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleStatusChange(batch.id, 'ready')}
+                                                                    className="block text-[10px] text-neutral-400 hover:text-neutral-600 underline"
+                                                                    title="Re-open status"
+                                                                >
+                                                                    Undo
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ) : isPendingApproval ? (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="text-[10px] font-medium border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                                                        >
+                                                            Pending Approval
+                                                        </Badge>
+                                                    ) : (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="text-[10px] font-medium border-neutral-300 text-neutral-500 dark:border-neutral-700 dark:text-neutral-400"
+                                                        >
+                                                            {batch.application_status.replace('_', ' ')}
+                                                        </Badge>
+                                                    )}
+
+                                                    {/* Allotment Details Link */}
+                                                    {batch.allotment_details && !batch.allotment_details?.checking && !checkingBatchIds[batch.id] && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setAllotmentBatch(batch);
+                                                                setAllotmentResult({
+                                                                    success: true,
+                                                                    found: true,
+                                                                    allotted: batch.allotment_details?.allotted,
+                                                                    all_shares: batch.allotment_details?.allotted_shares,
+                                                                    app_shares: batch.allotment_details?.applied_shares,
+                                                                    application_number: batch.allotment_details?.application_number,
+                                                                    order_number: batch.allotment_details?.order_number,
+                                                                    upi_amount: batch.allotment_details?.upi_amount,
+                                                                    upi_status: batch.allotment_details?.upi_status,
+                                                                    allotment_price: batch.allotment_details?.allotment_price,
+                                                                    provider: batch.allotment_details?.source,
+                                                                    name_from_pan: batch.allotment_details?.name_from_pan,
+                                                                    dp_clid: batch.allotment_details?.dp_clid,
+                                                                    pan_masked: batch.allotment_details?.pan_masked,
+                                                                    pan_full: panNumberRaw || undefined,
+                                                                    kfin_ipo_name: batch.allotment_details?.kfin_ipo_name,
+                                                                    checked_at: batch.allotment_details?.checked_at,
+                                                                });
+                                                                setAllotmentModalOpen(true);
+                                                            }}
+                                                            className="mt-1 flex items-center gap-0.5 text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-medium"
+                                                        >
+                                                            <span>{(batch.allotment_details?.source?.toUpperCase() || 'Allotment') + ' Details'}</span>
+                                                            <ExternalLink className="h-2.5 w-2.5 ml-0.5 opacity-70" />
+                                                        </button>
                                                     )}
                                                 </td>
-                                                <td className="py-3 px-3">
-                                                    <div className="space-y-1">
-                                                        {batch.allotment_details?.checking || checkingBatchIds[batch.id] ? (
-                                                            <Badge
-                                                                variant="outline"
-                                                                className="text-[10px] uppercase font-bold border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 animate-pulse flex items-center gap-1"
-                                                            >
-                                                                <Loader2 className="h-2.5 w-2.5 animate-spin text-amber-600" /> Checking Allotment
-                                                            </Badge>
-                                                        ) : (
-                                                            <Badge
-                                                                variant="outline"
-                                                                className={`text-[10px] uppercase font-semibold ${
-                                                                    isAllotted
-                                                                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                                                        : isNotAllotted
-                                                                        ? 'border-rose-300 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                                                                        : isPendingApproval
-                                                                        ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                                                                        : 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                                                                }`}
-                                                            >
-                                                                {isAllotted ? 'Allotted' : isNotAllotted ? 'Not Allotted' : isPendingApproval ? 'Pending Approval' : (batch.application_status.replace('_', ' '))}
-                                                            </Badge>
-                                                        )}
 
-                                                        {/* Allotment Details Info (when not checking) */}
-                                                        {batch.allotment_details && !batch.allotment_details?.checking && !checkingBatchIds[batch.id] && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setAllotmentBatch(batch);
-                                                                    setAllotmentResult({
-                                                                        success: true,
-                                                                        found: true,
-                                                                        allotted: batch.allotment_details?.allotted,
-                                                                        all_shares: batch.allotment_details?.allotted_shares,
-                                                                        app_shares: batch.allotment_details?.applied_shares,
-                                                                        application_number: batch.allotment_details?.application_number,
-                                                                        order_number: batch.allotment_details?.order_number,
-                                                                        upi_amount: batch.allotment_details?.upi_amount,
-                                                                        upi_status: batch.allotment_details?.upi_status,
-                                                                        allotment_price: batch.allotment_details?.allotment_price,
-                                                                        provider: batch.allotment_details?.source,
-                                                                        name_from_pan: batch.allotment_details?.name_from_pan,
-                                                                        dp_clid: batch.allotment_details?.dp_clid,
-                                                                        pan_masked: batch.allotment_details?.pan_masked,
-                                                                        pan_full: panNumberRaw || undefined,
-                                                                        kfin_ipo_name: batch.allotment_details?.kfin_ipo_name,
-                                                                        checked_at: batch.allotment_details?.checked_at,
-                                                                    });
-                                                                    setAllotmentModalOpen(true);
-                                                                }}
-                                                                className="block text-[10px] text-sky-600 dark:text-sky-400 hover:underline font-medium"
-                                                            >
-                                                                {(batch.allotment_details?.source?.toUpperCase() || 'Allotment') + ' Details ↗'}
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td className="py-3 px-3 text-right">
-                                                    <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                                {/* 7. Actions */}
+                                                <td className="py-3 px-3 text-right align-top whitespace-nowrap">
+                                                    <div className="flex items-center justify-end gap-1 flex-wrap">
                                                         {/* Approval controls for admin */}
                                                         {isPendingApproval && isAdmin && (
                                                             <>
@@ -1978,7 +2030,7 @@ export default function IpoShow({
                                                             </>
                                                         )}
 
-                                                        {/* Check Allotment Button or Background Checking Badge */}
+                                                        {/* Live Background Checking Button */}
                                                         {batch.allotment_details?.checking || checkingBatchIds[batch.id] ? (
                                                             <Button
                                                                 size="sm"
@@ -1994,8 +2046,8 @@ export default function IpoShow({
                                                                     });
                                                                     setAllotmentModalOpen(true);
                                                                 }}
-                                                                className="h-7 px-2 text-xs font-semibold border-amber-400 bg-amber-50/80 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700 animate-pulse shadow-2xs"
-                                                                title="Allotment check running in background across BSE, NSE, and Registrars. Click to view live progress."
+                                                                className="h-7 px-2 text-xs font-semibold border-amber-400 bg-amber-50/80 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 animate-pulse"
+                                                                title="Check in progress. Click to view modal."
                                                             >
                                                                 <Loader2 className="h-3 w-3 mr-1 animate-spin text-amber-600" /> Checking...
                                                             </Button>
@@ -2004,24 +2056,26 @@ export default function IpoShow({
                                                                 size="sm"
                                                                 variant={isBatchAllotmentToday ? 'default' : 'outline'}
                                                                 onClick={() => handleCheckAllotment(batch)}
-                                                                className={`h-7 px-2.5 text-xs font-semibold ${
+                                                                className={`h-7 px-2 text-xs font-semibold ${
                                                                     isBatchAllotmentToday
-                                                                        ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm ring-1 ring-sky-400'
-                                                                        : 'border-sky-400 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300 dark:hover:bg-sky-950/50'
+                                                                        ? 'bg-sky-600 hover:bg-sky-700 text-white shadow-2xs'
+                                                                        : 'border-sky-300 text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-300'
                                                                 }`}
-                                                                title={isBatchAllotmentToday ? 'Today is Allotment Day! Live query in background' : `Check allotment in background (Allotment: ${formatIstDate(allotmentDateStr)})`}
+                                                                title={isBatchAllotmentToday ? 'Today is Allotment Day! Live query in background' : `Check allotment online (Allotment: ${formatIstDate(allotmentDateStr)})`}
                                                             >
-                                                                <Search className={`h-3 w-3 mr-1 ${isBatchAllotmentToday ? 'text-white' : 'text-sky-600'}`} /> Check Allotment
+                                                                <Search className={`h-3 w-3 mr-1 ${isBatchAllotmentToday ? 'text-white' : 'text-sky-600'}`} />
+                                                                {hasAutoCheckResult ? 'Re-check' : 'Check'}
                                                             </Button>
                                                         ) : null}
 
+                                                        {/* Manual Mark for pending without auto check */}
                                                         {isPending && (
                                                             <>
                                                                 <Button
                                                                     size="sm"
                                                                     onClick={() => handleStatusChange(batch.id, 'allotted')}
                                                                     className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
-                                                                    title="Mark Allotted (Auto-records profit & returns capital)"
+                                                                    title="Mark Allotted"
                                                                 >
                                                                     <Check className="h-3 w-3 mr-1" /> Allotted
                                                                 </Button>
@@ -2029,58 +2083,22 @@ export default function IpoShow({
                                                                     size="sm"
                                                                     variant="outline"
                                                                     onClick={() => handleStatusChange(batch.id, 'not_allotted')}
-                                                                    className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800"
-                                                                    title="Mark Not Allotted (Refunds capital with ₹0 profit)"
+                                                                    className="h-7 px-2 text-xs border-red-300 text-red-600 hover:bg-red-50"
+                                                                    title="Mark Not Allotted"
                                                                 >
                                                                     <X className="h-3 w-3 mr-1" /> Not Allotted
                                                                 </Button>
                                                             </>
                                                         )}
 
-                                                        {isAllotted && (
-                                                            <div className="flex items-center gap-1.5">
-                                                                <span className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold inline-flex items-center bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800">
-                                                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Allotted
-                                                                </span>
-                                                                {!hasAutoCheckResult && (
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="ghost"
-                                                                        className="h-6 px-1.5 text-[10px] text-neutral-400 hover:text-neutral-600"
-                                                                        onClick={() => handleStatusChange(batch.id, 'ready')}
-                                                                        title="Re-open status"
-                                                                    >
-                                                                        Undo
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        )}
-
-                                                        {isNotAllotted && (
-                                                            <div className="flex items-center gap-1.5">
-                                                                <span className="text-xs text-rose-700 dark:text-rose-300 font-semibold inline-flex items-center bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded border border-rose-300 dark:border-rose-800">
-                                                                    <X className="h-3.5 w-3.5 mr-1 text-rose-600" /> Not Allotted
-                                                                </span>
-                                                                {!hasAutoCheckResult && (
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="ghost"
-                                                                        className="h-6 px-1.5 text-[10px] text-neutral-400 hover:text-neutral-600"
-                                                                        onClick={() => handleStatusChange(batch.id, 'ready')}
-                                                                        title="Re-open status"
-                                                                    >
-                                                                        Undo
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        )}
-
+                                                        {/* Adjust Settlement Button for Admin */}
                                                         {isAdmin && batch.settlement_status !== 'settled' && !isPending && (
                                                             <Button
                                                                 size="sm"
                                                                 variant="outline"
-                                                                className="h-7 text-xs border-emerald-600 text-emerald-600 ml-1"
+                                                                className="h-7 px-2 text-xs border-emerald-500 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
                                                                 onClick={() => openSettlementModal(batch)}
+                                                                title="Adjust Settlement"
                                                             >
                                                                 Adjust
                                                             </Button>
@@ -2091,11 +2109,11 @@ export default function IpoShow({
                                                             <Button
                                                                 size="sm"
                                                                 variant="ghost"
-                                                                className="h-7 text-xs px-2 text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-50"
+                                                                className="h-7 w-7 p-0 text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400"
                                                                 onClick={() => setEditingBatch(batch)}
-                                                                title="Edit Application (Rates, PAN, Details)"
+                                                                title="Edit Application"
                                                             >
-                                                                <Edit3 className="h-3 w-3 mr-1 text-blue-600" /> Edit
+                                                                <Edit3 className="h-3.5 w-3.5" />
                                                             </Button>
                                                         )}
 
@@ -2104,7 +2122,7 @@ export default function IpoShow({
                                                             <Button
                                                                 size="sm"
                                                                 variant="ghost"
-                                                                className="text-neutral-400 hover:text-red-600 h-7 text-xs px-1.5"
+                                                                className="h-7 w-7 p-0 text-neutral-400 hover:text-red-600 dark:hover:text-red-400"
                                                                 onClick={() => setDeletingBatch(batch)}
                                                                 title="Delete Application"
                                                             >
@@ -2126,21 +2144,23 @@ export default function IpoShow({
                             <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3">
                                 <div>
                                     <CardTitle className="text-base font-semibold">IPO Applications & Tracking</CardTitle>
-                                    <CardDescription>Applications filled with dynamic profit sharing, bank accounts, and 1-click allotment actions</CardDescription>
+                                    <CardDescription className="text-xs text-neutral-500">
+                                        {batches.length} application{batches.length === 1 ? '' : 's'} recorded · Allotment tracking & profit settlement
+                                    </CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                    {/* Bulk Allotment Check Button (Background Worker) */}
+                                    {/* Bulk Allotment Check Button */}
                                     {isAdmin && (
                                         <Button
                                             size="sm"
-                                            onClick={handleCheckAllAllotments}
+                                            onClick={() => handleCheckAllAllotments('auto')}
                                             disabled={isCheckingAllAllotments}
-                                            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold h-8 shadow-xs"
-                                            title="Check allotment for all unallotted applications of this IPO in background"
+                                            className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold h-8 shadow-xs"
+                                            title="Check allotment for all applications across BSE and NSE portals"
                                         >
                                             {isCheckingAllAllotments ? (
                                                 <>
-                                                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Dispatching...
+                                                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Checking...
                                                 </>
                                             ) : (
                                                 <>
@@ -2150,30 +2170,45 @@ export default function IpoShow({
                                         </Button>
                                     )}
 
-                                    {/* CSV Export Option 1: User Rates CSV */}
-                                    <a
-                                        href={`/ipos/${ipo.id}/export/user-csv`}
-                                        download
-                                        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-700 shadow-2xs transition-colors"
-                                        title="Export CSV with Serial No, PAN Holder, PAN, and User Applied Rate"
-                                    >
-                                        <Download className="h-3.5 w-3.5 text-blue-600" />
-                                        User Rates CSV
-                                    </a>
+                                    {/* Export Dropdown (Consolidated CSVs) */}
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-8 text-xs font-medium text-neutral-700 dark:text-neutral-200"
+                                            >
+                                                <Download className="mr-1.5 h-3.5 w-3.5 text-neutral-500" />
+                                                Export <ChevronDown className="ml-1 h-3 w-3 opacity-60" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-48 text-xs">
+                                            <DropdownMenuItem asChild>
+                                                <a
+                                                    href={`/ipos/${ipo.id}/export/user-csv`}
+                                                    download
+                                                    className="flex items-center gap-2 cursor-pointer w-full"
+                                                >
+                                                    <FileText className="h-3.5 w-3.5 text-blue-600" />
+                                                    <span>User Rates CSV</span>
+                                                </a>
+                                            </DropdownMenuItem>
+                                            {isAdmin && (
+                                                <DropdownMenuItem asChild>
+                                                    <a
+                                                        href={`/ipos/${ipo.id}/export/trader-csv`}
+                                                        download
+                                                        className="flex items-center gap-2 cursor-pointer w-full"
+                                                    >
+                                                        <FileSpreadsheet className="h-3.5 w-3.5 text-purple-600" />
+                                                        <span>Trader Rates CSV</span>
+                                                    </a>
+                                                </DropdownMenuItem>
+                                            )}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
 
-                                    {/* CSV Export Option 2: Trader Rates CSV (Admin only) */}
-                                    {isAdmin && (
-                                        <a
-                                            href={`/ipos/${ipo.id}/export/trader-csv`}
-                                            download
-                                            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-purple-300 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-950/40 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 shadow-2xs transition-colors"
-                                            title="Export CSV with Serial No, PAN Holder, PAN, and Trader Rate"
-                                        >
-                                            <FileSpreadsheet className="h-3.5 w-3.5 text-purple-600" />
-                                            Trader Rates CSV
-                                        </a>
-                                    )}
-
+                                    {/* Bank Accounts Button */}
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -2181,8 +2216,10 @@ export default function IpoShow({
                                         className="text-xs h-8"
                                     >
                                         <Landmark className="mr-1.5 h-3.5 w-3.5 text-neutral-500" />
-                                        Bank Accounts ({bankAccounts.length})
+                                        Banks ({bankAccounts.length})
                                     </Button>
+
+                                    {/* Record / Fill Application Primary Button */}
                                     <Button
                                         size="sm"
                                         disabled={!isAdmin && ipo.accept_fix_applications === false}
@@ -2192,7 +2229,7 @@ export default function IpoShow({
                                         }}
                                         className={!isAdmin && ipo.accept_fix_applications === false
                                             ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed border border-neutral-300 dark:border-neutral-700 text-xs h-8"
-                                            : "bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8"
+                                            : "bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 font-semibold shadow-xs"
                                         }
                                     >
                                         {!isAdmin && ipo.accept_fix_applications === false ? (
@@ -2201,7 +2238,7 @@ export default function IpoShow({
                                             </>
                                         ) : (
                                             <>
-                                                <Plus className="mr-1.5 h-3.5 w-3.5" /> + Fill Application
+                                                <Plus className="mr-1.5 h-3.5 w-3.5" /> Fill Application
                                             </>
                                         )}
                                     </Button>
@@ -2393,21 +2430,6 @@ export default function IpoShow({
 
                                                 {/* Right: Toolbar controls (Search, Rates, Bulk Check, Reset) */}
                                                 <div className="flex flex-wrap items-center gap-2 flex-1 lg:justify-end">
-                                                    {/* Quick Bulk Check Allotments in toolbar */}
-                                                    {isAdmin && (
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={() => handleCheckAllAllotments('auto')}
-                                                            disabled={isCheckingAllAllotments}
-                                                            className="h-9 px-2.5 text-xs border-sky-300 text-sky-700 bg-sky-50/80 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300"
-                                                            title="Check all applications against BSE & NSE allotment portals"
-                                                        >
-                                                            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 text-sky-600 ${isCheckingAllAllotments ? 'animate-spin' : ''}`} />
-                                                            {isCheckingAllAllotments ? 'Checking...' : 'Check All (BSE/NSE)'}
-                                                        </Button>
-                                                    )}
-
                                                     {/* User Rate Filter */}
                                                     <div className="w-[140px] sm:w-[155px]">
                                                         <Select value={selectedUserRate} onValueChange={setSelectedUserRate}>
