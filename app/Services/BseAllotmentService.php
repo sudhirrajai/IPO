@@ -183,8 +183,6 @@ class BseAllotmentService
             ];
         }
 
-        $data = null;
-
         try {
             $response = Http::withHeaders(self::getHeaders())
                 ->timeout(12)
@@ -201,33 +199,34 @@ class BseAllotmentService
             Log::warning('BSE allotment check HTTP request failed: ' . $e->getMessage());
         }
 
-        // Headless Chrome fallback if HTTP request is blocked by BSE Akamai/WAF
-        if ($data === null) {
-            $scraperOutput = self::executeScraper('query', $imId, $pan, $appNo);
-            if (! empty($scraperOutput) && preg_match('/RESULT_START\s*([\s\S]*?)\s*RESULT_END/', $scraperOutput, $matches)) {
-                $data = json_decode(trim($matches[1]), true);
+        try {
+            // Headless Chrome fallback if HTTP request is blocked by BSE Akamai/WAF
+            if ($data === null) {
+                $scraperOutput = self::executeScraper('query', $imId, $pan, $appNo);
+                if (! empty($scraperOutput) && preg_match('/RESULT_START\s*([\s\S]*?)\s*RESULT_END/', $scraperOutput, $matches)) {
+                    $data = json_decode(trim($matches[1]), true);
+                }
             }
-        }
 
-        if ($data === null || ! is_array($data)) {
-            return [
-                'success' => false,
-                'status' => 'http_error',
-                'found' => false,
-                'message' => 'Unable to reach BSE allotment verification service (WAF blocked).',
-                'allotted' => false,
-                'all_shares' => 0,
-                'app_shares' => 0,
-                'application_number' => null,
-                'order_number' => null,
-                'upi_amount' => null,
-                'upi_status' => null,
-                'allotment_price' => null,
-                'symbol' => null,
-                'pan' => $pan,
-                'provider' => 'bse',
-            ];
-        }
+            if ($data === null || ! is_array($data)) {
+                return [
+                    'success' => false,
+                    'status' => 'http_error',
+                    'found' => false,
+                    'message' => 'Unable to reach BSE allotment verification service (WAF blocked).',
+                    'allotted' => false,
+                    'all_shares' => 0,
+                    'app_shares' => 0,
+                    'application_number' => null,
+                    'order_number' => null,
+                    'upi_amount' => null,
+                    'upi_status' => null,
+                    'allotment_price' => null,
+                    'symbol' => null,
+                    'pan' => $pan,
+                    'provider' => 'bse',
+                ];
+            }
 
         $table = $data['Table'] ?? [];
 
