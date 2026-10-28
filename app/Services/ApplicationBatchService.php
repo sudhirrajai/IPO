@@ -616,17 +616,28 @@ class ApplicationBatchService
             return 0;
         }
 
-        // Reset listing settlement values for not-allotted batches
-        ApplicationBatch::where('ipo_id', $ipo->id)
+        // For not-allotted batches in a listed IPO, user is still owed their fixed payout (if any),
+        // so net collectible from user for that batch is - (userPayout).
+        $notAllottedBatches = ApplicationBatch::where('ipo_id', $ipo->id)
             ->where(function ($query) {
                 $query->where('application_status', 'not_allotted')
                     ->orWhere('allotment_details->allotted', false);
             })
-            ->update([
+            ->get();
+
+        foreach ($notAllottedBatches as $b) {
+            $count = max(1, (int) ($b->application_count ?? 1));
+            $userRatePerLot = (float) ($b->profit_sharing_type === 'fix'
+                ? $b->profit_sharing_value
+                : ($b->published_rate_snapshot ?: $b->profit_sharing_value));
+            $userPayout = round($userRatePerLot * $count, 2);
+
+            $b->update([
                 'listing_profit' => 0,
-                'user_collectible_amount' => 0,
+                'user_collectible_amount' => round(0.0 - $userPayout, 2),
                 'trader_payable_amount' => 0,
             ]);
+        }
 
         $allottedBatches = ApplicationBatch::where('ipo_id', $ipo->id)
             ->where('application_status', '!=', 'not_allotted')
@@ -659,9 +670,8 @@ class ApplicationBatchService
             $totalTraderRate = round($traderRatePerLot * $count, 2);
 
             // 1. Collectible from User = Total Listing Profit - User Payout
-            // The user sells shares from their demat and receives all listing profit.
-            // After keeping their rate (e.g. ₹1,500), they return the remaining profit (e.g. ₹1,500) to Admin.
-            $userCollectible = max(0.0, round($totalListingProfit - $totalUserPayout, 2));
+            // e.g. 2,868 - 1,000 = +1,868
+            $userCollectible = round($totalListingProfit - $totalUserPayout, 2);
 
             // 2. Admin Net Margin = Trader Rate - User Rate
             // For example: ₹2,000 - ₹1,500 = ₹500

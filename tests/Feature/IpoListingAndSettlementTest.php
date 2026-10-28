@@ -81,3 +81,102 @@ test('admin can set listing price and base price, and allotted batches calculate
         ->and($csvContent)->toContain('"Admin Margin"')
         ->and($csvContent)->toContain('3000,1500,1500,2000,500,1000');
 });
+
+test('user with multiple applications where some are not allotted nets fixed rates against listing profits properly', function () {
+    $admin = User::factory()->create(['role' => 'admin']);
+    $user = User::factory()->create(['role' => 'user', 'name' => 'Vishal Rajput']);
+
+    // Jio IPO: 12 shares, base 13428, listing 1358 -> profit = 2868
+    $ipo = Ipo::create([
+        'company_name' => 'Reliance Jio IPO',
+        'symbol' => 'JIOPLATFOR',
+        'exchange' => 'NSE',
+        'lot_size' => 12,
+        'base_price_per_lot' => 13428.0,
+        'listing_price' => 1358.0,
+        'listing_profit_per_lot' => 2868.0,
+        'status' => 'listed',
+    ]);
+
+    // App 1: Allotted, User Rate = 1000
+    $batch1 = ApplicationBatch::create([
+        'user_id' => $user->id,
+        'ipo_id' => $ipo->id,
+        'batch_number' => 'BATCH-TEST-001',
+        'pan_number' => 'DXXPG8212D',
+        'applicant_name' => 'Vishal Rajput',
+        'application_count' => 1,
+        'profit_sharing_type' => 'fix',
+        'published_rate_snapshot' => 1000.0,
+        'profit_sharing_value' => 1000.0,
+        'trader_rate_snapshot' => 1300.0,
+        'application_status' => 'allotted',
+        'settlement_status' => 'settled',
+    ]);
+
+    // App 2: Not Allotted, User Rate = 1000
+    $batch2 = ApplicationBatch::create([
+        'user_id' => $user->id,
+        'ipo_id' => $ipo->id,
+        'batch_number' => 'BATCH-TEST-002',
+        'pan_number' => 'HOCPM9695C',
+        'applicant_name' => 'Abhishek makwana',
+        'application_count' => 1,
+        'profit_sharing_type' => 'fix',
+        'published_rate_snapshot' => 1000.0,
+        'profit_sharing_value' => 1000.0,
+        'trader_rate_snapshot' => 1300.0,
+        'application_status' => 'not_allotted',
+        'settlement_status' => 'settled',
+    ]);
+
+    // App 3: Allotted, User Rate = 1000
+    $batch3 = ApplicationBatch::create([
+        'user_id' => $user->id,
+        'ipo_id' => $ipo->id,
+        'batch_number' => 'BATCH-TEST-003',
+        'pan_number' => 'AMSPM9278A',
+        'applicant_name' => 'Dipika Makwana',
+        'application_count' => 1,
+        'profit_sharing_type' => 'fix',
+        'published_rate_snapshot' => 1000.0,
+        'profit_sharing_value' => 1000.0,
+        'trader_rate_snapshot' => 1300.0,
+        'application_status' => 'allotted',
+        'settlement_status' => 'settled',
+    ]);
+
+    \App\Services\ApplicationBatchService::recalculateListingSettlementsForIpo($ipo);
+
+    $batch1->refresh();
+    $batch2->refresh();
+    $batch3->refresh();
+
+    // App 1: 2868 profit - 1000 rate = 1868 collect
+    expect((float) $batch1->listing_profit)->toBe(2868.0)
+        ->and((float) $batch1->user_collectible_amount)->toBe(1868.0);
+
+    // App 2: Not allotted -> 0 profit - 1000 rate = -1000 collect
+    expect((float) $batch2->listing_profit)->toBe(0.0)
+        ->and((float) $batch2->user_collectible_amount)->toBe(-1000.0);
+
+    // App 3: 2868 profit - 1000 rate = 1868 collect
+    expect((float) $batch3->listing_profit)->toBe(2868.0)
+        ->and((float) $batch3->user_collectible_amount)->toBe(1868.0);
+
+    // Total net collectible across the 3 applications: 1868 + (-1000) + 1868 = 2736
+    $totalCollectible = $batch1->user_collectible_amount + $batch2->user_collectible_amount + $batch3->user_collectible_amount;
+    expect((float) $totalCollectible)->toBe(2736.0);
+
+    // Test CsvExportService data for this user
+    $items = CsvExportService::getUserRatesData($ipo, $user->id);
+    expect($items)->toHaveCount(3);
+
+    $totList = array_sum(array_column($items, 'listing_profit'));
+    $totUser = array_sum(array_column($items, 'user_rate'));
+    $totCollect = array_sum(array_column($items, 'collect_from_user'));
+
+    expect((float) $totList)->toBe(5736.0)
+        ->and((float) $totUser)->toBe(3000.0)
+        ->and((float) $totCollect)->toBe(2736.0);
+});

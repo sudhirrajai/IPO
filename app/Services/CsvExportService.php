@@ -311,12 +311,12 @@ class CsvExportService
 
             if ($isAllotted && $listingProfitPerLot > 0) {
                 $itemListingProfit = $listingProfitPerLot;
-                $itemCollectFromUser = max(0.0, round($itemListingProfit - $userRate, 2));
+                $itemCollectFromUser = round($itemListingProfit - $userRate, 2);
                 $itemAdminMargin = max(0.0, round($traderRate - $userRate, 2));
                 $itemPayToTrader = max(0.0, round($itemListingProfit - $traderRate, 2));
             } else {
                 $itemListingProfit = 0.0;
-                $itemCollectFromUser = 0.0;
+                $itemCollectFromUser = $listingProfitPerLot > 0 ? round(0.0 - $userRate, 2) : 0.0;
                 $itemAdminMargin = 0.0;
                 $itemPayToTrader = 0.0;
             }
@@ -482,7 +482,7 @@ class CsvExportService
                             $item['status'],
                             '-',
                             $formatRate($item['user_rate']),
-                            '-',
+                            $item['collect_from_user'] != 0 ? $formatRate($item['collect_from_user']) : '-',
                             $formatRate($item['trader_rate']),
                             '-',
                             '-',
@@ -729,7 +729,7 @@ class CsvExportService
                                 $ui['status'],
                                 '-',
                                 $formatRate($ui['user_rate']),
-                                '-',
+                                $ui['collect_from_user'] != 0 ? $formatRate($ui['collect_from_user']) : '-',
                                 $formatRate($ui['trader_rate']),
                                 '-',
                                 '-',
@@ -922,7 +922,7 @@ class CsvExportService
                         $item['status'],
                         $item['is_allotted'] ? $formatRate($item['listing_profit']) : '-',
                         $formatRate($item['user_rate']),
-                        $item['is_allotted'] ? $formatRate($item['collect_from_user']) : '-',
+                        $item['collect_from_user'] != 0 ? $formatRate($item['collect_from_user']) : '-',
                         $formatRate($item['trader_rate']),
                         $item['is_allotted'] ? $formatRate($item['admin_margin']) : '-',
                         $item['is_allotted'] ? $formatRate($item['pay_to_trader']) : '-',
