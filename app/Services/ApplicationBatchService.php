@@ -616,10 +616,27 @@ class ApplicationBatchService
             return 0;
         }
 
+        // Reset listing settlement values for not-allotted batches
+        ApplicationBatch::where('ipo_id', $ipo->id)
+            ->where(function ($query) {
+                $query->where('application_status', 'not_allotted')
+                    ->orWhere('allotment_details->allotted', false);
+            })
+            ->update([
+                'listing_profit' => 0,
+                'user_collectible_amount' => 0,
+                'trader_payable_amount' => 0,
+            ]);
+
         $allottedBatches = ApplicationBatch::where('ipo_id', $ipo->id)
+            ->where('application_status', '!=', 'not_allotted')
             ->where(function ($query) {
                 $query->where('application_status', 'allotted')
-                    ->orWhere('settlement_status', 'settled');
+                    ->orWhere('allotment_details->allotted', true)
+                    ->orWhere(function ($q) {
+                        $q->where('settlement_status', 'settled')
+                            ->where('application_status', '!=', 'not_allotted');
+                    });
             })
             ->get();
 

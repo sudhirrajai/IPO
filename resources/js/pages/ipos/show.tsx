@@ -302,16 +302,23 @@ export default function IpoShow({
         let totalAdminMargin = 0;
         let totalPayToTrader = 0;
         let allottedLots = 0;
+        let totalTraderRateAllBatches = 0;
+        let totalUserRateAllBatches = 0;
 
         batches.forEach((b) => {
+            const count = Math.max(1, Number(b.application_count || 1));
+            const uRate = Number(b.profit_sharing_type === 'fix' ? b.profit_sharing_value : (b.published_rate_snapshot || b.profit_sharing_value || 0));
+            const tRate = Number(b.trader_rate_snapshot || 0) || uRate;
+            totalTraderRateAllBatches += tRate * count;
+            totalUserRateAllBatches += uRate * count;
+
             const isAllotted = b.application_status === 'allotted' || Boolean(b.allotment_details?.allotted);
             if (!isAllotted) return;
 
-            const count = Math.max(1, Number(b.application_count || 1));
             allottedLots += count;
 
             const batchListingProfit = Number(b.listing_profit || (profitPerLot * count));
-            const batchUserPayout = Number(b.settled_user_payout ?? b.expected_user_payout ?? 0);
+            const batchUserPayout = Number(b.settled_user_payout ?? b.expected_user_payout ?? (uRate * count));
             const traderRatePerLot = Number(b.trader_rate_snapshot || 0);
             const batchTraderRate = traderRatePerLot > 0 ? traderRatePerLot * count : batchUserPayout;
 
@@ -335,6 +342,8 @@ export default function IpoShow({
             totalTraderRate,
             totalAdminMargin,
             totalPayToTrader,
+            totalTraderRateAllBatches,
+            totalUserRateAllBatches,
         };
     }, [batches, ipo.calculated_listing_profit_per_lot]);
 
@@ -2457,14 +2466,26 @@ export default function IpoShow({
                                             )}
                                         </div>
 
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3">
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-3">
+                                            {/* 1. Total Demat Profit Pool */}
                                             <div className="rounded-lg bg-white/80 dark:bg-neutral-900/80 p-2.5 border border-indigo-100 dark:border-indigo-900/40">
-                                                <span className="text-[11px] font-medium text-neutral-500 block">Total Listing Profit ({allottedListingStats.allottedLots} lot{allottedListingStats.allottedLots > 1 ? 's' : ''})</span>
+                                                <span className="text-[11px] font-medium text-neutral-500 block">Total Profit Pool ({allottedListingStats.allottedLots} lot{allottedListingStats.allottedLots > 1 ? 's' : ''})</span>
                                                 <span className="text-base font-bold text-neutral-900 dark:text-neutral-100 block">
                                                     {formatInr(allottedListingStats.totalListingProfit)}
                                                 </span>
-                                                <span className="text-[10px] text-neutral-400">Total Demat profit generated</span>
+                                                <span className="text-[10px] text-neutral-400">₹{formatInr(ipo.calculated_listing_profit_per_lot)} / allotted lot</span>
                                             </div>
+
+                                            {/* 2. Total User Payouts */}
+                                            <div className="rounded-lg bg-sky-50/90 dark:bg-sky-950/30 p-2.5 border border-sky-200 dark:border-sky-800/40">
+                                                <span className="text-[11px] font-medium text-sky-800 dark:text-sky-300 block">User Payouts</span>
+                                                <span className="text-base font-bold text-sky-700 dark:text-sky-300 block">
+                                                    {formatInr(allottedListingStats.totalUserPayout)}
+                                                </span>
+                                                <span className="text-[10px] text-sky-700/80 dark:text-sky-400">Fixed rate paid to users</span>
+                                            </div>
+
+                                            {/* 3. Collect from Users */}
                                             <div className="rounded-lg bg-amber-50/90 dark:bg-amber-950/30 p-2.5 border border-amber-200 dark:border-amber-800/40">
                                                 <span className="text-[11px] font-medium text-amber-800 dark:text-amber-300 block flex items-center gap-1">
                                                     <ArrowDownLeft className="h-3 w-3 text-amber-600" /> Collect from Users
@@ -2472,8 +2493,19 @@ export default function IpoShow({
                                                 <span className="text-base font-bold text-amber-700 dark:text-amber-300 block">
                                                     {formatInr(allottedListingStats.totalCollectFromUsers)}
                                                 </span>
-                                                <span className="text-[10px] text-amber-700/80 dark:text-amber-400">Profit minus User Rate (₹{formatInr(allottedListingStats.totalUserPayout)})</span>
+                                                <span className="text-[10px] text-amber-700/80 dark:text-amber-400">Profit minus User Payouts</span>
                                             </div>
+
+                                            {/* 4. Trader Rate on Allotted */}
+                                            <div className="rounded-lg bg-neutral-50/90 dark:bg-neutral-800/60 p-2.5 border border-neutral-200 dark:border-neutral-700">
+                                                <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300 block">Trader Rate (Allotted)</span>
+                                                <span className="text-base font-bold text-neutral-800 dark:text-neutral-200 block">
+                                                    {formatInr(allottedListingStats.totalTraderRate)}
+                                                </span>
+                                                <span className="text-[10px] text-neutral-500">All {batches.length} apps: {formatInr(allottedListingStats.totalTraderRateAllBatches)}</span>
+                                            </div>
+
+                                            {/* 5. Admin Margin */}
                                             <div className="rounded-lg bg-emerald-50/90 dark:bg-emerald-950/30 p-2.5 border border-emerald-200 dark:border-emerald-800/40">
                                                 <span className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300 block">Admin Margin</span>
                                                 <span className="text-base font-bold text-emerald-700 dark:text-emerald-300 block">
@@ -2481,6 +2513,8 @@ export default function IpoShow({
                                                 </span>
                                                 <span className="text-[10px] text-emerald-700/80 dark:text-emerald-400">Trader Rate - User Rate</span>
                                             </div>
+
+                                            {/* 6. Pay to Trader */}
                                             <div className="rounded-lg bg-purple-50/90 dark:bg-purple-950/30 p-2.5 border border-purple-200 dark:border-purple-800/40">
                                                 <span className="text-[11px] font-medium text-purple-800 dark:text-purple-300 block flex items-center gap-1">
                                                     <ArrowUpRight className="h-3 w-3 text-purple-600" /> Pay to Trader
@@ -2488,7 +2522,7 @@ export default function IpoShow({
                                                 <span className="text-base font-bold text-purple-700 dark:text-purple-400 block">
                                                     {formatInr(allottedListingStats.totalPayToTrader)}
                                                 </span>
-                                                <span className="text-[10px] text-purple-700/80 dark:text-purple-400">Profit - Trader Rate (₹{formatInr(allottedListingStats.totalTraderRate)})</span>
+                                                <span className="text-[10px] text-purple-700/80 dark:text-purple-400">Profit - Trader Rate</span>
                                             </div>
                                         </div>
                                     </div>
@@ -4727,10 +4761,10 @@ export default function IpoShow({
                                 </div>
                                 <div className="text-[11px] text-neutral-600 dark:text-neutral-300 space-y-1">
                                     <p>&bull; <strong>User Demat Total:</strong> Base Capital (₹{Number(basePricePerLotInput || (Number(ipo.lot_size || 1) * Number(ipo.issue_price || 0))).toLocaleString('en-IN')}) + Profit (₹{Number(listingProfitPerLotInput).toLocaleString('en-IN')})</p>
-                                    <p>&bull; <strong>User Keeps:</strong> Base Capital + User Fixed Rate (e.g. ₹1,500)</p>
-                                    <p>&bull; <strong>Collect from User:</strong> Profit - User Rate = <strong>₹{Math.max(0, Number(listingProfitPerLotInput) - 1500).toLocaleString('en-IN')}</strong></p>
-                                    <p>&bull; <strong>Admin Margin:</strong> Trader Rate (e.g. ₹2,000) - User Rate (₹1,500) = <strong>₹500</strong></p>
-                                    <p>&bull; <strong>Pay to Trader:</strong> Profit - Trader Rate (₹2,000) = <strong>₹{Math.max(0, Number(listingProfitPerLotInput) - 2000).toLocaleString('en-IN')}</strong></p>
+                                    <p>&bull; <strong>User Keeps:</strong> Base Capital + User Fixed Rate (e.g. ₹1,100)</p>
+                                    <p>&bull; <strong>Collect from User:</strong> Profit - User Rate = <strong>₹{Math.max(0, Number(listingProfitPerLotInput) - 1100).toLocaleString('en-IN')}</strong></p>
+                                    <p>&bull; <strong>Admin Margin:</strong> Trader Rate (e.g. ₹1,400) - User Rate (₹1,100) = <strong>₹300</strong></p>
+                                    <p>&bull; <strong>Pay to Trader:</strong> Profit - Trader Rate (₹1,400) = <strong>₹{Math.max(0, Number(listingProfitPerLotInput) - 1400).toLocaleString('en-IN')}</strong></p>
                                 </div>
                             </div>
                         )}
