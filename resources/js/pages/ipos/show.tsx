@@ -1,8 +1,10 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
     AlertCircle,
+    ArrowDownLeft,
     ArrowLeft,
     ArrowRight,
+    ArrowUpRight,
     Building2,
     Calculator,
     Calendar,
@@ -145,6 +147,13 @@ export default function IpoShow({
     // Edit Application Modal state (Admin only)
     const [editingBatch, setEditingBatch] = useState<ApplicationBatch | null>(null);
 
+    // Listing & Settlement Modal state (Admin only)
+    const [isListingModalOpen, setIsListingModalOpen] = useState(false);
+    const [listingPriceInput, setListingPriceInput] = useState<string>(ipo.listing_price ? String(ipo.listing_price) : '');
+    const [basePricePerLotInput, setBasePricePerLotInput] = useState<string>(ipo.base_price_per_lot ? String(ipo.base_price_per_lot) : '');
+    const [listingProfitPerLotInput, setListingProfitPerLotInput] = useState<string>(ipo.listing_profit_per_lot ? String(ipo.listing_profit_per_lot) : '');
+    const [listingStatusInput, setListingStatusInput] = useState<string>(ipo.status === 'listed' ? 'listed' : 'listed');
+
     // Deduplicate bank accounts by normalized name so HDFC is only listed once and labels don't repeat
     const uniqueBanks = useMemo(() => {
         const map = new Map<string, { bank_name: string; upis: UserUpi[] }>();
@@ -282,6 +291,52 @@ export default function IpoShow({
             allottedShares: totalAllottedShares,
         };
     }, [batches, checkedBatchIds, ipo.lot_size]);
+
+    // Listing & Collection Statistics for Allotted Batches
+    const allottedListingStats = useMemo(() => {
+        const profitPerLot = Number(ipo.calculated_listing_profit_per_lot || 0);
+        let totalListingProfit = 0;
+        let totalUserPayout = 0;
+        let totalCollectFromUsers = 0;
+        let totalTraderRate = 0;
+        let totalAdminMargin = 0;
+        let totalPayToTrader = 0;
+        let allottedLots = 0;
+
+        batches.forEach((b) => {
+            const isAllotted = b.application_status === 'allotted' || Boolean(b.allotment_details?.allotted);
+            if (!isAllotted) return;
+
+            const count = Math.max(1, Number(b.application_count || 1));
+            allottedLots += count;
+
+            const batchListingProfit = Number(b.listing_profit || (profitPerLot * count));
+            const batchUserPayout = Number(b.settled_user_payout ?? b.expected_user_payout ?? 0);
+            const traderRatePerLot = Number(b.trader_rate_snapshot || 0);
+            const batchTraderRate = traderRatePerLot > 0 ? traderRatePerLot * count : batchUserPayout;
+
+            const collectible = Number(b.user_collectible_amount ?? Math.max(0, batchListingProfit - batchUserPayout));
+            const margin = Number(b.settled_net_earnings ?? Math.max(0, batchTraderRate - batchUserPayout));
+            const traderPayable = Number(b.trader_payable_amount ?? Math.max(0, batchListingProfit - batchTraderRate));
+
+            totalListingProfit += batchListingProfit;
+            totalUserPayout += batchUserPayout;
+            totalCollectFromUsers += collectible;
+            totalTraderRate += batchTraderRate;
+            totalAdminMargin += margin;
+            totalPayToTrader += traderPayable;
+        });
+
+        return {
+            allottedLots,
+            totalListingProfit,
+            totalUserPayout,
+            totalCollectFromUsers,
+            totalTraderRate,
+            totalAdminMargin,
+            totalPayToTrader,
+        };
+    }, [batches, ipo.calculated_listing_profit_per_lot]);
 
     const filteredBatches = useMemo(() => {
         return batches.filter((batch) => {
@@ -828,6 +883,19 @@ export default function IpoShow({
         }, {
             preserveScroll: true,
             onSuccess: () => setIsGmpModalOpen(false),
+        });
+    };
+
+    const handleListingSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        router.post(`/ipos/${ipo.id}/listing`, {
+            listing_price: listingPriceInput !== '' ? Number(listingPriceInput) : null,
+            base_price_per_lot: basePricePerLotInput !== '' ? Number(basePricePerLotInput) : null,
+            listing_profit_per_lot: listingProfitPerLotInput !== '' ? Number(listingProfitPerLotInput) : null,
+            status: listingStatusInput,
+        }, {
+            preserveScroll: true,
+            onSuccess: () => setIsListingModalOpen(false),
         });
     };
 
@@ -1899,9 +1967,17 @@ export default function IpoShow({
                                                     </div>
                                                     <div className="mt-1">
                                                         {isAllotted ? (
-                                                            <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400 block">
-                                                                Payout: {formatInr(batch.settled_user_payout ?? batch.expected_user_payout)}
-                                                            </span>
+                                                            <div className="space-y-1">
+                                                                <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400 block">
+                                                                    User Keeps: {formatInr(batch.settled_user_payout ?? batch.expected_user_payout)}
+                                                                </span>
+                                                                {((batch.user_collectible_amount !== undefined && batch.user_collectible_amount !== null && Number(batch.user_collectible_amount) > 0) || (Number(ipo.calculated_listing_profit_per_lot || 0) > 0)) && (
+                                                                    <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 text-[10px] font-semibold">
+                                                                        <ArrowDownLeft className="h-3 w-3 text-amber-600 shrink-0" />
+                                                                        Collect: {formatInr(batch.user_collectible_amount ?? Math.max(0, (Number(ipo.calculated_listing_profit_per_lot || 0) * Number(batch.application_count || 1)) - Number(batch.settled_user_payout ?? batch.expected_user_payout ?? 0)))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         ) : isNotAllotted ? (
                                                             <span className="text-xs text-neutral-400 block">Payout: ₹0</span>
                                                         ) : (
@@ -1911,9 +1987,16 @@ export default function IpoShow({
                                                         )}
                                                     </div>
                                                     {isAdmin && (
-                                                        <span className="text-[10px] text-neutral-400 block mt-0.5">
-                                                            Admin Net: {formatInr(isAllotted ? (batch.settled_net_earnings ?? batch.expected_net_earnings) : isNotAllotted ? 0 : batch.expected_net_earnings)}
-                                                        </span>
+                                                        <div className="text-[10px] space-y-0.5 text-neutral-500 pt-0.5">
+                                                            <span className="block font-medium text-emerald-700 dark:text-emerald-400">
+                                                                Admin Net: {formatInr(isAllotted ? (batch.settled_net_earnings ?? batch.expected_net_earnings) : isNotAllotted ? 0 : batch.expected_net_earnings)}
+                                                            </span>
+                                                            {isAllotted && ((batch.trader_payable_amount !== undefined && batch.trader_payable_amount !== null && Number(batch.trader_payable_amount) > 0) || (Number(ipo.calculated_listing_profit_per_lot || 0) > 0)) && (
+                                                                <span className="block text-purple-700 dark:text-purple-400 font-medium">
+                                                                    Pay Trader: {formatInr(batch.trader_payable_amount ?? Math.max(0, (Number(ipo.calculated_listing_profit_per_lot || 0) * Number(batch.application_count || 1)) - (Number(batch.trader_rate_snapshot || 0) * Number(batch.application_count || 1))))}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     )}
                                                 </td>
 
@@ -2179,6 +2262,20 @@ export default function IpoShow({
                                         </Button>
                                     )}
 
+                                    {/* Set / Edit Listing Price & Settlement Button for Admin */}
+                                    {isAdmin && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setIsListingModalOpen(true)}
+                                            className="h-8 text-xs font-semibold border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/50 shadow-2xs"
+                                            title="Configure listing price, base price, and settle payouts for allotted applications"
+                                        >
+                                            <TrendingUp className="mr-1.5 h-3.5 w-3.5 text-indigo-600" />
+                                            {ipo.status === 'listed' || ipo.listing_price ? 'Edit Listing Price' : 'Set Listing Price'}
+                                        </Button>
+                                    )}
+
                                     {/* Export Dropdown (Excel & CSV) */}
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
@@ -2323,6 +2420,77 @@ export default function IpoShow({
                                         >
                                             <Check className="mr-1.5 h-3.5 w-3.5" /> Approve All ({pendingBatchesCount})
                                         </Button>
+                                    </div>
+                                )}
+
+                                {/* Listing & Profit Settlement Banner */}
+                                {(ipo.status === 'listed' || Number(ipo.listing_price || 0) > 0 || Number(ipo.calculated_listing_profit_per_lot || 0) > 0) && (
+                                    <div className="mb-5 overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50/70 via-white to-sky-50/60 p-4 shadow-xs dark:border-indigo-900/60 dark:from-indigo-950/30 dark:via-neutral-900 dark:to-sky-950/20">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-100 dark:border-indigo-900/50">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow">
+                                                    <TrendingUp className="h-5 w-5" />
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <h3 className="font-semibold text-indigo-950 dark:text-indigo-200">
+                                                            IPO Listed & Profit Settlement
+                                                        </h3>
+                                                        <Badge className="bg-emerald-600 text-white text-[10px] font-semibold">
+                                                            Listed @ ₹{ipo.listing_price || '—'}/sh
+                                                        </Badge>
+                                                    </div>
+                                                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                                                        Base capital per lot: <strong className="text-neutral-700 dark:text-neutral-200">{formatInr(ipo.base_price_per_lot || (Number(ipo.lot_size || 1) * Number(ipo.issue_price || 0)))}</strong> (retained by user in Demat) &bull; Net Profit per lot: <strong className="text-emerald-600 dark:text-emerald-400">{formatInr(ipo.calculated_listing_profit_per_lot)}</strong>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {isAdmin && (
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => setIsListingModalOpen(true)}
+                                                    className="h-7 text-xs border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:text-indigo-300 shrink-0"
+                                                >
+                                                    <Edit3 className="mr-1 h-3 w-3" /> Adjust Listing Rates
+                                                </Button>
+                                            )}
+                                        </div>
+
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3">
+                                            <div className="rounded-lg bg-white/80 dark:bg-neutral-900/80 p-2.5 border border-indigo-100 dark:border-indigo-900/40">
+                                                <span className="text-[11px] font-medium text-neutral-500 block">Total Listing Profit ({allottedListingStats.allottedLots} lot{allottedListingStats.allottedLots > 1 ? 's' : ''})</span>
+                                                <span className="text-base font-bold text-neutral-900 dark:text-neutral-100 block">
+                                                    {formatInr(allottedListingStats.totalListingProfit)}
+                                                </span>
+                                                <span className="text-[10px] text-neutral-400">Total Demat profit generated</span>
+                                            </div>
+                                            <div className="rounded-lg bg-amber-50/90 dark:bg-amber-950/30 p-2.5 border border-amber-200 dark:border-amber-800/40">
+                                                <span className="text-[11px] font-medium text-amber-800 dark:text-amber-300 block flex items-center gap-1">
+                                                    <ArrowDownLeft className="h-3 w-3 text-amber-600" /> Collect from Users
+                                                </span>
+                                                <span className="text-base font-bold text-amber-700 dark:text-amber-300 block">
+                                                    {formatInr(allottedListingStats.totalCollectFromUsers)}
+                                                </span>
+                                                <span className="text-[10px] text-amber-700/80 dark:text-amber-400">Profit minus User Rate (₹{formatInr(allottedListingStats.totalUserPayout)})</span>
+                                            </div>
+                                            <div className="rounded-lg bg-emerald-50/90 dark:bg-emerald-950/30 p-2.5 border border-emerald-200 dark:border-emerald-800/40">
+                                                <span className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300 block">Admin Margin</span>
+                                                <span className="text-base font-bold text-emerald-700 dark:text-emerald-300 block">
+                                                    {formatInr(allottedListingStats.totalAdminMargin)}
+                                                </span>
+                                                <span className="text-[10px] text-emerald-700/80 dark:text-emerald-400">Trader Rate - User Rate</span>
+                                            </div>
+                                            <div className="rounded-lg bg-purple-50/90 dark:bg-purple-950/30 p-2.5 border border-purple-200 dark:border-purple-800/40">
+                                                <span className="text-[11px] font-medium text-purple-800 dark:text-purple-300 block flex items-center gap-1">
+                                                    <ArrowUpRight className="h-3 w-3 text-purple-600" /> Pay to Trader
+                                                </span>
+                                                <span className="text-base font-bold text-purple-700 dark:text-purple-400 block">
+                                                    {formatInr(allottedListingStats.totalPayToTrader)}
+                                                </span>
+                                                <span className="text-[10px] text-purple-700/80 dark:text-purple-400">Profit - Trader Rate (₹{formatInr(allottedListingStats.totalTraderRate)})</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 
@@ -4459,6 +4627,132 @@ export default function IpoShow({
                 ipo={ipo}
                 isAdmin={isAdmin}
             />
+
+            {/* Listing & Profit Settlement Modal (Admin Only) */}
+            <Dialog open={isListingModalOpen} onOpenChange={setIsListingModalOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-indigo-950 dark:text-indigo-200">
+                            <TrendingUp className="h-5 w-5 text-indigo-600" />
+                            IPO Listing Price & Settlement
+                        </DialogTitle>
+                        <DialogDescription>
+                            Configure listing price and base investment for <strong>{ipo.company_name}</strong>. This automatically updates user money collection, trader payouts, and admin margins across all allotted applications.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form onSubmit={handleListingSubmit} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="listing_price" className="text-xs font-semibold">Listing Price / Share (₹)</Label>
+                                <Input
+                                    id="listing_price"
+                                    type="number"
+                                    step="0.05"
+                                    placeholder="e.g. 1358"
+                                    value={listingPriceInput}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setListingPriceInput(val);
+                                        const p = Number(val);
+                                        const lot = Math.max(1, Number(ipo.lot_size || 1));
+                                        const base = Number(basePricePerLotInput || (lot * Number(ipo.issue_price || 0)));
+                                        if (p > 0 && base > 0) {
+                                            setListingProfitPerLotInput(String(Math.round((p * lot) - base)));
+                                        }
+                                    }}
+                                />
+                                <span className="text-[10px] text-neutral-400">Lot size: {ipo.lot_size || 1} shares</span>
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label htmlFor="base_price_per_lot" className="text-xs font-semibold">Base Price / Lot (₹)</Label>
+                                <Input
+                                    id="base_price_per_lot"
+                                    type="number"
+                                    step="0.01"
+                                    placeholder={`e.g. ${Math.round(Number(ipo.lot_size || 1) * Number(ipo.issue_price || 0)) || 13448}`}
+                                    value={basePricePerLotInput}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setBasePricePerLotInput(val);
+                                        const base = Number(val);
+                                        const p = Number(listingPriceInput || 0);
+                                        const lot = Math.max(1, Number(ipo.lot_size || 1));
+                                        if (p > 0 && base > 0) {
+                                            setListingProfitPerLotInput(String(Math.round((p * lot) - base)));
+                                        }
+                                    }}
+                                />
+                                <span className="text-[10px] text-neutral-400">User's invested capital (retained in Demat)</span>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="listing_profit_per_lot" className="text-xs font-semibold">Net Profit / Lot (₹) *</Label>
+                                <Input
+                                    id="listing_profit_per_lot"
+                                    type="number"
+                                    step="1"
+                                    placeholder="e.g. 3000"
+                                    value={listingProfitPerLotInput}
+                                    onChange={(e) => setListingProfitPerLotInput(e.target.value)}
+                                    required
+                                />
+                                <span className="text-[10px] text-neutral-400">Actual gain per allotted lot</span>
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label htmlFor="listing_status" className="text-xs font-semibold">IPO Status</Label>
+                                <select
+                                    id="listing_status"
+                                    value={listingStatusInput}
+                                    onChange={(e) => setListingStatusInput(e.target.value)}
+                                    className="w-full h-9 text-xs rounded-md border border-neutral-300 dark:border-neutral-700 bg-background px-3 py-1 text-neutral-900 dark:text-neutral-100"
+                                >
+                                    <option value="listed">Listed (Active Settlement)</option>
+                                    <option value="closed">Closed / Allotment Complete</option>
+                                    <option value="ongoing">Ongoing</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Live calculation breakdown preview */}
+                        {Number(listingProfitPerLotInput || 0) > 0 && (
+                            <div className="rounded-lg bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/50 p-3 text-xs space-y-2">
+                                <div className="font-semibold text-indigo-950 dark:text-indigo-200 flex items-center justify-between">
+                                    <span>Settlement Example (Per 1 Allotted Lot)</span>
+                                    <Badge className="bg-indigo-600 text-white text-[10px]">Profit: ₹{Number(listingProfitPerLotInput).toLocaleString('en-IN')}</Badge>
+                                </div>
+                                <div className="text-[11px] text-neutral-600 dark:text-neutral-300 space-y-1">
+                                    <p>&bull; <strong>User Demat Total:</strong> Base Capital (₹{Number(basePricePerLotInput || (Number(ipo.lot_size || 1) * Number(ipo.issue_price || 0))).toLocaleString('en-IN')}) + Profit (₹{Number(listingProfitPerLotInput).toLocaleString('en-IN')})</p>
+                                    <p>&bull; <strong>User Keeps:</strong> Base Capital + User Fixed Rate (e.g. ₹1,500)</p>
+                                    <p>&bull; <strong>Collect from User:</strong> Profit - User Rate = <strong>₹{Math.max(0, Number(listingProfitPerLotInput) - 1500).toLocaleString('en-IN')}</strong></p>
+                                    <p>&bull; <strong>Admin Margin:</strong> Trader Rate (e.g. ₹2,000) - User Rate (₹1,500) = <strong>₹500</strong></p>
+                                    <p>&bull; <strong>Pay to Trader:</strong> Profit - Trader Rate (₹2,000) = <strong>₹{Math.max(0, Number(listingProfitPerLotInput) - 2000).toLocaleString('en-IN')}</strong></p>
+                                </div>
+                            </div>
+                        )}
+
+                        <DialogFooter className="gap-2 sm:gap-0 pt-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setIsListingModalOpen(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
+                            >
+                                Save & Recalculate Batches
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
         </AppLayout>
     );
 }

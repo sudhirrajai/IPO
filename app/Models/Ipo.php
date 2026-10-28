@@ -25,6 +25,9 @@ class Ipo extends Model
         'price_band_min',
         'price_band_max',
         'issue_price',
+        'listing_price',
+        'base_price_per_lot',
+        'listing_profit_per_lot',
         'lot_size',
         'min_retail_qty',
         'issue_size',
@@ -57,7 +60,34 @@ class Ipo extends Model
         'hni_gain',
         'min_gmp',
         'max_gmp',
+        'calculated_listing_profit_per_lot',
     ];
+
+    public function getCalculatedListingProfitPerLotAttribute(): ?float
+    {
+        if ($this->listing_profit_per_lot !== null && (float) $this->listing_profit_per_lot > 0) {
+            return (float) $this->listing_profit_per_lot;
+        }
+
+        $listingPrice = (float) ($this->listing_price ?? 0);
+        $lot = max(1, (int) ($this->lot_size ?? 1));
+
+        if ($listingPrice <= 0) {
+            return null;
+        }
+
+        $basePerLot = (float) ($this->base_price_per_lot ?? 0);
+        if ($basePerLot > 0) {
+            return round(($listingPrice * $lot) - $basePerLot, 2);
+        }
+
+        $issuePrice = (float) ($this->issue_price ?? $this->price_band_max ?? 0);
+        if ($issuePrice > 0) {
+            return round(($listingPrice - $issuePrice) * $lot, 2);
+        }
+
+        return null;
+    }
 
     public function getGmpPercentAttribute(): ?float
     {

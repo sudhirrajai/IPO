@@ -24,6 +24,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/ipos', [IpoController::class, 'index'])->name('ipos.index');
     Route::get('/ipos/{ipo}', [IpoController::class, 'show'])->name('ipos.show');
     Route::post('/ipos/{ipo}/gmp', [IpoController::class, 'updateGmp'])->name('ipos.gmp');
+    Route::post('/ipos/{ipo}/listing', [IpoController::class, 'updateListing'])->name('ipos.listing');
     Route::post('/ipos/{ipo}/favorite', [IpoController::class, 'toggleFavorite'])->name('ipos.favorite');
 
     // Applications

@@ -44,6 +44,10 @@ export interface Ipo {
     price_band_min?: number | string | null;
     price_band_max?: number | string | null;
     issue_price?: number | string | null;
+    listing_price?: number | string | null;
+    base_price_per_lot?: number | string | null;
+    listing_profit_per_lot?: number | string | null;
+    calculated_listing_profit_per_lot?: number | null;
     lot_size: number;
     min_retail_qty?: number | null;
     issue_size?: number | string | null;
@@ -169,6 +173,9 @@ export interface ApplicationBatch {
     settled_user_payout?: number | string | null;
     settled_net_earnings?: number | string | null;
     capital_returned?: number | string | null;
+    listing_profit?: number | string | null;
+    user_collectible_amount?: number | string | null;
+    trader_payable_amount?: number | string | null;
     application_status:
         | 'draft'
         | 'ready'

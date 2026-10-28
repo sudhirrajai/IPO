@@ -438,6 +438,17 @@ class ApplicationBatchService
             $updateFields['settled_user_payout'] = $userPayout;
             $updateFields['settled_net_earnings'] = $netEarnings;
             $updateFields['capital_returned'] = $capitalAmount;
+
+            $listingProfitPerLot = (float) ($ipo->calculated_listing_profit_per_lot ?? 0);
+            if ($listingProfitPerLot > 0) {
+                $totListing = round($listingProfitPerLot * $count, 2);
+                $totTrader = round(($traderRate > 0 ? $traderRate : $publishedRate) * $count, 2);
+                $updateFields['listing_profit'] = $totListing;
+                $updateFields['user_collectible_amount'] = max(0.0, round($totListing - $userPayout, 2));
+                $updateFields['trader_payable_amount'] = max(0.0, round($totListing - $totTrader, 2));
+                $updateFields['settled_gross_profit'] = $totListing;
+                $updateFields['settled_net_earnings'] = max(0.0, round($totTrader - $userPayout, 2));
+            }
         }
 
         if (! empty($data['applicant_name'])) {
@@ -593,5 +604,68 @@ class ApplicationBatchService
             'message' => 'No allotment records found on BSE, NSE, or registrar portals for this application.',
             'provider' => 'auto',
         ];
+    }
+
+    /**
+     * Recalculate listing settlement, profit distribution, collections from users, and trader payouts for all allotted batches in an IPO.
+     */
+    public static function recalculateListingSettlementsForIpo(Ipo $ipo): int
+    {
+        $profitPerLot = (float) ($ipo->calculated_listing_profit_per_lot ?? 0);
+        if ($profitPerLot <= 0) {
+            return 0;
+        }
+
+        $allottedBatches = ApplicationBatch::where('ipo_id', $ipo->id)
+            ->where(function ($query) {
+                $query->where('application_status', 'allotted')
+                    ->orWhere('settlement_status', 'settled');
+            })
+            ->get();
+
+        $updatedCount = 0;
+
+        foreach ($allottedBatches as $batch) {
+            $count = max(1, (int) ($batch->application_count ?? 1));
+            $totalListingProfit = round($profitPerLot * $count, 2);
+
+            // User rate (what user is entitled to keep)
+            $userRatePerLot = (float) ($batch->profit_sharing_type === 'fix'
+                ? $batch->profit_sharing_value
+                : ($batch->published_rate_snapshot ?: $batch->profit_sharing_value));
+            $totalUserPayout = round($userRatePerLot * $count, 2);
+
+            // Trader rate (what trader bought it for)
+            $traderRatePerLot = (float) ((float) $batch->trader_rate_snapshot > 0
+                ? $batch->trader_rate_snapshot
+                : ($batch->published_rate_snapshot ?: $batch->profit_sharing_value));
+            $totalTraderRate = round($traderRatePerLot * $count, 2);
+
+            // 1. Collectible from User = Total Listing Profit - User Payout
+            // The user sells shares from their demat and receives all listing profit.
+            // After keeping their rate (e.g. ₹1,500), they return the remaining profit (e.g. ₹1,500) to Admin.
+            $userCollectible = max(0.0, round($totalListingProfit - $totalUserPayout, 2));
+
+            // 2. Admin Net Margin = Trader Rate - User Rate
+            // For example: ₹2,000 - ₹1,500 = ₹500
+            $adminMargin = max(0.0, round($totalTraderRate - $totalUserPayout, 2));
+
+            // 3. Trader Payable = Total Listing Profit - Trader Rate
+            // For example: ₹3,000 - ₹2,000 = ₹1,000
+            $traderPayable = max(0.0, round($totalListingProfit - $totalTraderRate, 2));
+
+            $batch->update([
+                'listing_profit' => $totalListingProfit,
+                'user_collectible_amount' => $userCollectible,
+                'trader_payable_amount' => $traderPayable,
+                'settled_gross_profit' => $totalListingProfit,
+                'settled_user_payout' => $totalUserPayout,
+                'settled_net_earnings' => $adminMargin,
+            ]);
+
+            $updatedCount++;
+        }
+
+        return $updatedCount;
     }
 }

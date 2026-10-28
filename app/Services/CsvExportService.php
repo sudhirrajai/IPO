@@ -255,7 +255,7 @@ class CsvExportService
      */
     public static function getUserRatesData(?Ipo $ipo = null, ?int $userId = null): array
     {
-        $query = ApplicationBatch::with(['user', 'batchPans.userPan'])
+        $query = ApplicationBatch::with(['user', 'batchPans.userPan', 'ipo'])
             ->where('application_status', '!=', 'cancelled');
 
         if ($ipo) {
@@ -269,6 +269,10 @@ class CsvExportService
         $batches = $query->orderBy('id')->get();
         $items = [];
         $serialNo = 1;
+
+        $formatRate = static function (float $num): string {
+            return (float) $num == (int) $num ? (string) (int) $num : number_format($num, 2, '.', '');
+        };
 
         foreach ($batches as $batch) {
             $userRate = (float) ($batch->profit_sharing_type === 'fix'
@@ -302,6 +306,21 @@ class CsvExportService
                 ? 'ALLOTTED' . ($allottedShares ? " ({$allottedShares} sh)" : '')
                 : ($isNotAllotted ? 'NOT ALLOTTED' : 'PENDING');
 
+            $targetIpo = $ipo ?: $batch->ipo;
+            $listingProfitPerLot = $targetIpo ? (float) ($targetIpo->calculated_listing_profit_per_lot ?? 0) : 0.0;
+
+            if ($isAllotted && $listingProfitPerLot > 0) {
+                $itemListingProfit = $listingProfitPerLot;
+                $itemCollectFromUser = max(0.0, round($itemListingProfit - $userRate, 2));
+                $itemAdminMargin = max(0.0, round($traderRate - $userRate, 2));
+                $itemPayToTrader = max(0.0, round($itemListingProfit - $traderRate, 2));
+            } else {
+                $itemListingProfit = 0.0;
+                $itemCollectFromUser = 0.0;
+                $itemAdminMargin = 0.0;
+                $itemPayToTrader = 0.0;
+            }
+
             $uName = $batch->user?->name ?: ($batch->applicant_name ?: 'User #' . $batch->user_id);
             $pans = $batch->batchPans;
 
@@ -328,9 +347,17 @@ class CsvExportService
                         'user_rate' => $userRate,
                         'trader_rate' => $traderRate,
                         'diff_amount' => $diffAmount,
+                        'listing_profit' => $itemListingProfit,
+                        'collect_from_user' => $itemCollectFromUser,
+                        'admin_margin' => $itemAdminMargin,
+                        'pay_to_trader' => $itemPayToTrader,
                         'formatted_user_rate' => $formattedUserRate,
                         'formatted_trader_rate' => $formattedTraderRate,
                         'formatted_diff' => $formattedDiff,
+                        'formatted_listing_profit' => $formatRate($itemListingProfit),
+                        'formatted_collect_from_user' => $formatRate($itemCollectFromUser),
+                        'formatted_admin_margin' => $formatRate($itemAdminMargin),
+                        'formatted_pay_to_trader' => $formatRate($itemPayToTrader),
                         'is_allotted' => $isAllotted,
                         'status' => $statusText,
                     ];
@@ -357,9 +384,17 @@ class CsvExportService
                         'user_rate' => $userRate,
                         'trader_rate' => $traderRate,
                         'diff_amount' => $diffAmount,
+                        'listing_profit' => $itemListingProfit,
+                        'collect_from_user' => $itemCollectFromUser,
+                        'admin_margin' => $itemAdminMargin,
+                        'pay_to_trader' => $itemPayToTrader,
                         'formatted_user_rate' => $formattedUserRate,
                         'formatted_trader_rate' => $formattedTraderRate,
                         'formatted_diff' => $formattedDiff,
+                        'formatted_listing_profit' => $formatRate($itemListingProfit),
+                        'formatted_collect_from_user' => $formatRate($itemCollectFromUser),
+                        'formatted_admin_margin' => $formatRate($itemAdminMargin),
+                        'formatted_pay_to_trader' => $formatRate($itemPayToTrader),
                         'is_allotted' => $isAllotted,
                         'status' => $statusText,
                     ];
@@ -384,6 +419,14 @@ class CsvExportService
         $existingSheetNames = [];
         $sheets = [];
 
+        $hasListing = false;
+        foreach ($items as $item) {
+            if ($item['listing_profit'] > 0) {
+                $hasListing = true;
+                break;
+            }
+        }
+
         if ($isAdmin) {
             // Group applications by User
             $userGroups = [];
@@ -392,108 +435,243 @@ class CsvExportService
             }
 
             // Sheet 1: All Applications
-            $allRows = [[
-                '<b>Serial No</b>',
-                '<b>User / Applicant</b>',
-                '<b>Name of PAN Holder</b>',
-                '<b>PAN Number</b>',
-                '<b>User Rate</b>',
-                '<b>Trader Rate</b>',
-                '<b>Diff Amount</b>',
-                '<b>Allotment Status</b>',
-            ]];
+            if ($hasListing) {
+                $allRows = [[
+                    '<b>Serial No</b>',
+                    '<b>User / Applicant</b>',
+                    '<b>Name of PAN Holder</b>',
+                    '<b>PAN Number</b>',
+                    '<b>Allotment Status</b>',
+                    '<b>Listing Profit</b>',
+                    '<b>User Rate</b>',
+                    '<b>Collect from User</b>',
+                    '<b>Trader Rate</b>',
+                    '<b>Admin Margin</b>',
+                    '<b>Pay to Trader</b>',
+                ]];
 
-            $totUser = 0; $totTrader = 0; $totDiff = 0; $totAllotted = 0;
-            foreach ($items as $item) {
-                $totUser += $item['user_rate'];
-                $totTrader += $item['trader_rate'];
-                $totDiff += $item['diff_amount'];
-                if ($item['is_allotted']) {
-                    $totAllotted++;
-                    $allRows[] = [
-                        '<style bgcolor="#FFFF00">' . $item['serial'] . '</style>',
-                        '<style bgcolor="#FFFF00">' . $item['user_name'] . '</style>',
-                        '<style bgcolor="#FFFF00">' . $item['holder_name'] . '</style>',
-                        '<style bgcolor="#FFFF00">' . $item['pan_number'] . '</style>',
-                        '<style bgcolor="#FFFF00">' . $formatRate($item['user_rate']) . '</style>',
-                        '<style bgcolor="#FFFF00">' . $formatRate($item['trader_rate']) . '</style>',
-                        '<style bgcolor="#FFFF00">' . $formatRate($item['diff_amount']) . '</style>',
-                        '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>',
-                    ];
-                } else {
-                    $allRows[] = [
-                        $item['serial'],
-                        $item['user_name'],
-                        $item['holder_name'],
-                        $item['pan_number'],
-                        $formatRate($item['user_rate']),
-                        $formatRate($item['trader_rate']),
-                        $formatRate($item['diff_amount']),
-                        $item['status'],
-                    ];
+                $totUser = 0; $totTrader = 0; $totListing = 0; $totCollect = 0; $totMargin = 0; $totPayTrader = 0; $totAllotted = 0;
+                foreach ($items as $item) {
+                    $totUser += $item['user_rate'];
+                    $totTrader += $item['trader_rate'];
+                    $totListing += $item['listing_profit'];
+                    $totCollect += $item['collect_from_user'];
+                    $totMargin += $item['admin_margin'];
+                    $totPayTrader += $item['pay_to_trader'];
+                    if ($item['is_allotted']) {
+                        $totAllotted++;
+                        $allRows[] = [
+                            '<style bgcolor="#FFFF00">' . $item['serial'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $item['user_name'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $item['holder_name'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $item['pan_number'] . '</style>',
+                            '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['listing_profit']) . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['user_rate']) . '</style>',
+                            '<b><style bgcolor="#FFFF00">' . $formatRate($item['collect_from_user']) . '</style></b>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['trader_rate']) . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['admin_margin']) . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['pay_to_trader']) . '</style>',
+                        ];
+                    } else {
+                        $allRows[] = [
+                            $item['serial'],
+                            $item['user_name'],
+                            $item['holder_name'],
+                            $item['pan_number'],
+                            $item['status'],
+                            '-',
+                            $formatRate($item['user_rate']),
+                            '-',
+                            $formatRate($item['trader_rate']),
+                            '-',
+                            '-',
+                        ];
+                    }
                 }
-            }
 
-            $allRows[] = [
-                '<b>TOTAL</b>',
-                '',
-                '',
-                '',
-                '<b>' . $formatRate($totUser) . '</b>',
-                '<b>' . $formatRate($totTrader) . '</b>',
-                '<b>' . $formatRate($totDiff) . '</b>',
-                '<b>Total: ' . count($items) . ' | Allotted: ' . $totAllotted . '</b>',
-            ];
+                $allRows[] = [
+                    '<b>TOTAL</b>',
+                    '',
+                    '',
+                    '',
+                    '<b>Total: ' . count($items) . ' | Allotted: ' . $totAllotted . '</b>',
+                    '<b>' . $formatRate($totListing) . '</b>',
+                    '<b>' . $formatRate($totUser) . '</b>',
+                    '<b>' . $formatRate($totCollect) . '</b>',
+                    '<b>' . $formatRate($totTrader) . '</b>',
+                    '<b>' . $formatRate($totMargin) . '</b>',
+                    '<b>' . $formatRate($totPayTrader) . '</b>',
+                ];
+            } else {
+                $allRows = [[
+                    '<b>Serial No</b>',
+                    '<b>User / Applicant</b>',
+                    '<b>Name of PAN Holder</b>',
+                    '<b>PAN Number</b>',
+                    '<b>User Rate</b>',
+                    '<b>Trader Rate</b>',
+                    '<b>Diff Amount</b>',
+                    '<b>Allotment Status</b>',
+                ]];
+
+                $totUser = 0; $totTrader = 0; $totDiff = 0; $totAllotted = 0;
+                foreach ($items as $item) {
+                    $totUser += $item['user_rate'];
+                    $totTrader += $item['trader_rate'];
+                    $totDiff += $item['diff_amount'];
+                    if ($item['is_allotted']) {
+                        $totAllotted++;
+                        $allRows[] = [
+                            '<style bgcolor="#FFFF00">' . $item['serial'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $item['user_name'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $item['holder_name'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $item['pan_number'] . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['user_rate']) . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['trader_rate']) . '</style>',
+                            '<style bgcolor="#FFFF00">' . $formatRate($item['diff_amount']) . '</style>',
+                            '<b><style bgcolor="#FFFF00">' . $item['status'] . '</style></b>',
+                        ];
+                    } else {
+                        $allRows[] = [
+                            $item['serial'],
+                            $item['user_name'],
+                            $item['holder_name'],
+                            $item['pan_number'],
+                            $formatRate($item['user_rate']),
+                            $formatRate($item['trader_rate']),
+                            $formatRate($item['diff_amount']),
+                            $item['status'],
+                        ];
+                    }
+                }
+
+                $allRows[] = [
+                    '<b>TOTAL</b>',
+                    '',
+                    '',
+                    '',
+                    '<b>' . $formatRate($totUser) . '</b>',
+                    '<b>' . $formatRate($totTrader) . '</b>',
+                    '<b>' . $formatRate($totDiff) . '</b>',
+                    '<b>Total: ' . count($items) . ' | Allotted: ' . $totAllotted . '</b>',
+                ];
+            }
 
             $sheets[] = [
                 'name' => self::sanitizeSheetName('All Applications', $existingSheetNames),
                 'rows' => $allRows,
             ];
 
-            // Sheet 2: Payout Summary (when multiple users are present)
+            // Sheet 2: Payout & Settlement Summary (when multiple users are present)
             if (count($userGroups) > 1) {
-                $summaryRows = [[
-                    '<b>Serial No</b>',
-                    '<b>User / Applicant</b>',
-                    '<b>Applications</b>',
-                    '<b>Allotted</b>',
-                    '<b>User Rate Total (Payout)</b>',
-                    '<b>Trader Rate Total</b>',
-                    '<b>Diff Amount Total (Profit)</b>',
-                ]];
-                $sumIdx = 1;
-                foreach ($userGroups as $uName => $uItems) {
-                    $uApps = count($uItems);
-                    $uAllotted = 0; $uUserTot = 0; $uTraderTot = 0; $uDiffTot = 0;
-                    foreach ($uItems as $ui) {
-                        if ($ui['is_allotted']) $uAllotted++;
-                        $uUserTot += $ui['user_rate'];
-                        $uTraderTot += $ui['trader_rate'];
-                        $uDiffTot += $ui['diff_amount'];
-                    }
-                    $allottedCell = $uAllotted > 0
-                        ? '<b><style bgcolor="#FFFF00">' . $uAllotted . '</style></b>'
-                        : (string) $uAllotted;
+                if ($hasListing) {
+                    $summaryRows = [[
+                        '<b>Serial No</b>',
+                        '<b>User / Applicant</b>',
+                        '<b>Applications</b>',
+                        '<b>Allotted</b>',
+                        '<b>Listing Profit Total</b>',
+                        '<b>User Rate Total</b>',
+                        '<b>Collect from User Total</b>',
+                        '<b>Trader Rate Total</b>',
+                        '<b>Admin Margin Total</b>',
+                        '<b>Pay to Trader Total</b>',
+                    ]];
+                    $sumIdx = 1;
+                    $sumListing = 0; $sumUser = 0; $sumCollect = 0; $sumTrader = 0; $sumMargin = 0; $sumPayTrader = 0;
+                    foreach ($userGroups as $uName => $uItems) {
+                        $uApps = count($uItems);
+                        $uAllotted = 0; $uUserTot = 0; $uTraderTot = 0; $uListTot = 0; $uCollectTot = 0; $uMarginTot = 0; $uPayTraderTot = 0;
+                        foreach ($uItems as $ui) {
+                            if ($ui['is_allotted']) $uAllotted++;
+                            $uUserTot += $ui['user_rate'];
+                            $uTraderTot += $ui['trader_rate'];
+                            $uListTot += $ui['listing_profit'];
+                            $uCollectTot += $ui['collect_from_user'];
+                            $uMarginTot += $ui['admin_margin'];
+                            $uPayTraderTot += $ui['pay_to_trader'];
+                        }
+                        $sumListing += $uListTot;
+                        $sumUser += $uUserTot;
+                        $sumCollect += $uCollectTot;
+                        $sumTrader += $uTraderTot;
+                        $sumMargin += $uMarginTot;
+                        $sumPayTrader += $uPayTraderTot;
 
+                        $allottedCell = $uAllotted > 0
+                            ? '<b><style bgcolor="#FFFF00">' . $uAllotted . '</style></b>'
+                            : (string) $uAllotted;
+
+                        $summaryRows[] = [
+                            $sumIdx++,
+                            $uName,
+                            $uApps,
+                            $allottedCell,
+                            $formatRate($uListTot),
+                            $formatRate($uUserTot),
+                            '<b>' . $formatRate($uCollectTot) . '</b>',
+                            $formatRate($uTraderTot),
+                            $formatRate($uMarginTot),
+                            $formatRate($uPayTraderTot),
+                        ];
+                    }
                     $summaryRows[] = [
-                        $sumIdx++,
-                        $uName,
-                        $uApps,
-                        $allottedCell,
-                        $formatRate($uUserTot),
-                        $formatRate($uTraderTot),
-                        $formatRate($uDiffTot),
+                        '<b>TOTAL</b>',
+                        '<b>' . count($userGroups) . ' Users</b>',
+                        '<b>' . count($items) . '</b>',
+                        '<b>' . $totAllotted . '</b>',
+                        '<b>' . $formatRate($sumListing) . '</b>',
+                        '<b>' . $formatRate($sumUser) . '</b>',
+                        '<b>' . $formatRate($sumCollect) . '</b>',
+                        '<b>' . $formatRate($sumTrader) . '</b>',
+                        '<b>' . $formatRate($sumMargin) . '</b>',
+                        '<b>' . $formatRate($sumPayTrader) . '</b>',
+                    ];
+                } else {
+                    $summaryRows = [[
+                        '<b>Serial No</b>',
+                        '<b>User / Applicant</b>',
+                        '<b>Applications</b>',
+                        '<b>Allotted</b>',
+                        '<b>User Rate Total (Payout)</b>',
+                        '<b>Trader Rate Total</b>',
+                        '<b>Diff Amount Total (Profit)</b>',
+                    ]];
+                    $sumIdx = 1;
+                    foreach ($userGroups as $uName => $uItems) {
+                        $uApps = count($uItems);
+                        $uAllotted = 0; $uUserTot = 0; $uTraderTot = 0; $uDiffTot = 0;
+                        foreach ($uItems as $ui) {
+                            if ($ui['is_allotted']) $uAllotted++;
+                            $uUserTot += $ui['user_rate'];
+                            $uTraderTot += $ui['trader_rate'];
+                            $uDiffTot += $ui['diff_amount'];
+                        }
+                        $allottedCell = $uAllotted > 0
+                            ? '<b><style bgcolor="#FFFF00">' . $uAllotted . '</style></b>'
+                            : (string) $uAllotted;
+
+                        $summaryRows[] = [
+                            $sumIdx++,
+                            $uName,
+                            $uApps,
+                            $allottedCell,
+                            $formatRate($uUserTot),
+                            $formatRate($uTraderTot),
+                            $formatRate($uDiffTot),
+                        ];
+                    }
+                    $summaryRows[] = [
+                        '<b>TOTAL</b>',
+                        '<b>' . count($userGroups) . ' Users</b>',
+                        '<b>' . count($items) . '</b>',
+                        '<b>' . $totAllotted . '</b>',
+                        '<b>' . $formatRate($totUser) . '</b>',
+                        '<b>' . $formatRate($totTrader) . '</b>',
+                        '<b>' . $formatRate($totDiff) . '</b>',
                     ];
                 }
-                $summaryRows[] = [
-                    '<b>TOTAL</b>',
-                    '<b>' . count($userGroups) . ' Users</b>',
-                    '<b>' . count($items) . '</b>',
-                    '<b>' . $totAllotted . '</b>',
-                    '<b>' . $formatRate($totUser) . '</b>',
-                    '<b>' . $formatRate($totTrader) . '</b>',
-                    '<b>' . $formatRate($totDiff) . '</b>',
-                ];
 
                 $sheets[] = [
                     'name' => self::sanitizeSheetName('Payout Summary', $existingSheetNames),
@@ -504,55 +682,124 @@ class CsvExportService
             // Sheets 3+: Individual User-Wise Sheets
             foreach ($userGroups as $uName => $uItems) {
                 $userSheetName = self::sanitizeSheetName($uName, $existingSheetNames);
-                $userRows = [[
-                    '<b>Serial No</b>',
-                    '<b>Name of PAN Holder</b>',
-                    '<b>PAN Number</b>',
-                    '<b>User Rate</b>',
-                    '<b>Trader Rate</b>',
-                    '<b>Diff Amount</b>',
-                    '<b>Allotment Status</b>',
-                ]];
 
-                $uTotUser = 0; $uTotTrader = 0; $uTotDiff = 0; $uTotAllotted = 0;
-                $uSerial = 1;
-                foreach ($uItems as $ui) {
-                    $uTotUser += $ui['user_rate'];
-                    $uTotTrader += $ui['trader_rate'];
-                    $uTotDiff += $ui['diff_amount'];
-                    if ($ui['is_allotted']) {
-                        $uTotAllotted++;
-                        $userRows[] = [
-                            '<style bgcolor="#FFFF00">' . $uSerial++ . '</style>',
-                            '<style bgcolor="#FFFF00">' . $ui['holder_name'] . '</style>',
-                            '<style bgcolor="#FFFF00">' . $ui['pan_number'] . '</style>',
-                            '<style bgcolor="#FFFF00">' . $formatRate($ui['user_rate']) . '</style>',
-                            '<style bgcolor="#FFFF00">' . $formatRate($ui['trader_rate']) . '</style>',
-                            '<style bgcolor="#FFFF00">' . $formatRate($ui['diff_amount']) . '</style>',
-                            '<b><style bgcolor="#FFFF00">' . $ui['status'] . '</style></b>',
-                        ];
-                    } else {
-                        $userRows[] = [
-                            $uSerial++,
-                            $ui['holder_name'],
-                            $ui['pan_number'],
-                            $formatRate($ui['user_rate']),
-                            $formatRate($ui['trader_rate']),
-                            $formatRate($ui['diff_amount']),
-                            $ui['status'],
-                        ];
+                if ($hasListing) {
+                    $userRows = [[
+                        '<b>Serial No</b>',
+                        '<b>Name of PAN Holder</b>',
+                        '<b>PAN Number</b>',
+                        '<b>Allotment Status</b>',
+                        '<b>Listing Profit</b>',
+                        '<b>User Rate</b>',
+                        '<b>Collect from User</b>',
+                        '<b>Trader Rate</b>',
+                        '<b>Admin Margin</b>',
+                        '<b>Pay to Trader</b>',
+                    ]];
+
+                    $uTotUser = 0; $uTotTrader = 0; $uTotList = 0; $uTotCollect = 0; $uTotMargin = 0; $uTotPayTrader = 0; $uTotAllotted = 0;
+                    $uSerial = 1;
+                    foreach ($uItems as $ui) {
+                        $uTotUser += $ui['user_rate'];
+                        $uTotTrader += $ui['trader_rate'];
+                        $uTotList += $ui['listing_profit'];
+                        $uTotCollect += $ui['collect_from_user'];
+                        $uTotMargin += $ui['admin_margin'];
+                        $uTotPayTrader += $ui['pay_to_trader'];
+
+                        if ($ui['is_allotted']) {
+                            $uTotAllotted++;
+                            $userRows[] = [
+                                '<style bgcolor="#FFFF00">' . $uSerial++ . '</style>',
+                                '<style bgcolor="#FFFF00">' . $ui['holder_name'] . '</style>',
+                                '<style bgcolor="#FFFF00">' . $ui['pan_number'] . '</style>',
+                                '<b><style bgcolor="#FFFF00">' . $ui['status'] . '</style></b>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['listing_profit']) . '</style>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['user_rate']) . '</style>',
+                                '<b><style bgcolor="#FFFF00">' . $formatRate($ui['collect_from_user']) . '</style></b>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['trader_rate']) . '</style>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['admin_margin']) . '</style>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['pay_to_trader']) . '</style>',
+                            ];
+                        } else {
+                            $userRows[] = [
+                                $uSerial++,
+                                $ui['holder_name'],
+                                $ui['pan_number'],
+                                $ui['status'],
+                                '-',
+                                $formatRate($ui['user_rate']),
+                                '-',
+                                $formatRate($ui['trader_rate']),
+                                '-',
+                                '-',
+                            ];
+                        }
                     }
-                }
 
-                $userRows[] = [
-                    '<b>TOTAL</b>',
-                    '',
-                    '',
-                    '<b>' . $formatRate($uTotUser) . '</b>',
-                    '<b>' . $formatRate($uTotTrader) . '</b>',
-                    '<b>' . $formatRate($uTotDiff) . '</b>',
-                    '<b>Total: ' . count($uItems) . ' | Allotted: ' . $uTotAllotted . '</b>',
-                ];
+                    $userRows[] = [
+                        '<b>TOTAL</b>',
+                        '',
+                        '',
+                        '<b>Total: ' . count($uItems) . ' | Allotted: ' . $uTotAllotted . '</b>',
+                        '<b>' . $formatRate($uTotList) . '</b>',
+                        '<b>' . $formatRate($uTotUser) . '</b>',
+                        '<b>' . $formatRate($uTotCollect) . '</b>',
+                        '<b>' . $formatRate($uTotTrader) . '</b>',
+                        '<b>' . $formatRate($uTotMargin) . '</b>',
+                        '<b>' . $formatRate($uTotPayTrader) . '</b>',
+                    ];
+                } else {
+                    $userRows = [[
+                        '<b>Serial No</b>',
+                        '<b>Name of PAN Holder</b>',
+                        '<b>PAN Number</b>',
+                        '<b>User Rate</b>',
+                        '<b>Trader Rate</b>',
+                        '<b>Diff Amount</b>',
+                        '<b>Allotment Status</b>',
+                    ]];
+
+                    $uTotUser = 0; $uTotTrader = 0; $uTotDiff = 0; $uTotAllotted = 0;
+                    $uSerial = 1;
+                    foreach ($uItems as $ui) {
+                        $uTotUser += $ui['user_rate'];
+                        $uTotTrader += $ui['trader_rate'];
+                        $uTotDiff += $ui['diff_amount'];
+                        if ($ui['is_allotted']) {
+                            $uTotAllotted++;
+                            $userRows[] = [
+                                '<style bgcolor="#FFFF00">' . $uSerial++ . '</style>',
+                                '<style bgcolor="#FFFF00">' . $ui['holder_name'] . '</style>',
+                                '<style bgcolor="#FFFF00">' . $ui['pan_number'] . '</style>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['user_rate']) . '</style>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['trader_rate']) . '</style>',
+                                '<style bgcolor="#FFFF00">' . $formatRate($ui['diff_amount']) . '</style>',
+                                '<b><style bgcolor="#FFFF00">' . $ui['status'] . '</style></b>',
+                            ];
+                        } else {
+                            $userRows[] = [
+                                $uSerial++,
+                                $ui['holder_name'],
+                                $ui['pan_number'],
+                                $formatRate($ui['user_rate']),
+                                $formatRate($ui['trader_rate']),
+                                $formatRate($ui['diff_amount']),
+                                $ui['status'],
+                            ];
+                        }
+                    }
+
+                    $userRows[] = [
+                        '<b>TOTAL</b>',
+                        '',
+                        '',
+                        '<b>' . $formatRate($uTotUser) . '</b>',
+                        '<b>' . $formatRate($uTotTrader) . '</b>',
+                        '<b>' . $formatRate($uTotDiff) . '</b>',
+                        '<b>Total: ' . count($uItems) . ' | Allotted: ' . $uTotAllotted . '</b>',
+                    ];
+                }
 
                 $sheets[] = [
                     'name' => $userSheetName,
@@ -632,48 +879,112 @@ class CsvExportService
             return (float) $num == (int) $num ? (string) (int) $num : number_format($num, 2, '.', '');
         };
 
-        if ($isAdmin) {
-            $headers = [
-                'Serial No',
-                'User / Applicant',
-                'Name of PAN Holder',
-                'PAN Number',
-                'User Rate',
-                'Trader Rate',
-                'Diff Amount',
-                'Allotment Status',
-            ];
+        $hasListing = false;
+        foreach ($items as $item) {
+            if ($item['listing_profit'] > 0) {
+                $hasListing = true;
+                break;
+            }
+        }
 
-            $rows = [];
-            $totUser = 0; $totTrader = 0; $totDiff = 0; $totAllotted = 0;
-            foreach ($items as $item) {
-                $totUser += $item['user_rate'];
-                $totTrader += $item['trader_rate'];
-                $totDiff += $item['diff_amount'];
-                if ($item['is_allotted']) $totAllotted++;
+        if ($isAdmin) {
+            if ($hasListing) {
+                $headers = [
+                    'Serial No',
+                    'User / Applicant',
+                    'Name of PAN Holder',
+                    'PAN Number',
+                    'Allotment Status',
+                    'Listing Profit',
+                    'User Rate',
+                    'Collect from User',
+                    'Trader Rate',
+                    'Admin Margin',
+                    'Pay to Trader',
+                ];
+
+                $rows = [];
+                $totUser = 0; $totTrader = 0; $totListing = 0; $totCollect = 0; $totMargin = 0; $totPayTrader = 0; $totAllotted = 0;
+                foreach ($items as $item) {
+                    $totUser += $item['user_rate'];
+                    $totTrader += $item['trader_rate'];
+                    $totListing += $item['listing_profit'];
+                    $totCollect += $item['collect_from_user'];
+                    $totMargin += $item['admin_margin'];
+                    $totPayTrader += $item['pay_to_trader'];
+                    if ($item['is_allotted']) $totAllotted++;
+
+                    $rows[] = [
+                        $item['serial'],
+                        $item['user_name'],
+                        $item['holder_name'],
+                        $item['pan_number'],
+                        $item['status'],
+                        $item['is_allotted'] ? $formatRate($item['listing_profit']) : '-',
+                        $formatRate($item['user_rate']),
+                        $item['is_allotted'] ? $formatRate($item['collect_from_user']) : '-',
+                        $formatRate($item['trader_rate']),
+                        $item['is_allotted'] ? $formatRate($item['admin_margin']) : '-',
+                        $item['is_allotted'] ? $formatRate($item['pay_to_trader']) : '-',
+                    ];
+                }
 
                 $rows[] = [
-                    $item['serial'],
-                    $item['user_name'],
-                    $item['holder_name'],
-                    $item['pan_number'],
-                    $formatRate($item['user_rate']),
-                    $formatRate($item['trader_rate']),
-                    $formatRate($item['diff_amount']),
-                    $item['status'],
+                    'TOTAL',
+                    '',
+                    '',
+                    '',
+                    'Total: ' . count($items) . ' | Allotted: ' . $totAllotted,
+                    $formatRate($totListing),
+                    $formatRate($totUser),
+                    $formatRate($totCollect),
+                    $formatRate($totTrader),
+                    $formatRate($totMargin),
+                    $formatRate($totPayTrader),
+                ];
+            } else {
+                $headers = [
+                    'Serial No',
+                    'User / Applicant',
+                    'Name of PAN Holder',
+                    'PAN Number',
+                    'User Rate',
+                    'Trader Rate',
+                    'Diff Amount',
+                    'Allotment Status',
+                ];
+
+                $rows = [];
+                $totUser = 0; $totTrader = 0; $totDiff = 0; $totAllotted = 0;
+                foreach ($items as $item) {
+                    $totUser += $item['user_rate'];
+                    $totTrader += $item['trader_rate'];
+                    $totDiff += $item['diff_amount'];
+                    if ($item['is_allotted']) $totAllotted++;
+
+                    $rows[] = [
+                        $item['serial'],
+                        $item['user_name'],
+                        $item['holder_name'],
+                        $item['pan_number'],
+                        $formatRate($item['user_rate']),
+                        $formatRate($item['trader_rate']),
+                        $formatRate($item['diff_amount']),
+                        $item['status'],
+                    ];
+                }
+
+                $rows[] = [
+                    'TOTAL',
+                    '',
+                    '',
+                    '',
+                    $formatRate($totUser),
+                    $formatRate($totTrader),
+                    $formatRate($totDiff),
+                    'Total: ' . count($items) . ' | Allotted: ' . $totAllotted,
                 ];
             }
-
-            $rows[] = [
-                'TOTAL',
-                '',
-                '',
-                '',
-                $formatRate($totUser),
-                $formatRate($totTrader),
-                $formatRate($totDiff),
-                'Total: ' . count($items) . ' | Allotted: ' . $totAllotted,
-            ];
         } else {
             $headers = [
                 'Serial No',

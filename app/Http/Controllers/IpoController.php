@@ -293,6 +293,65 @@ class IpoController extends Controller
         return back()->with('success', 'Grey Market Premium (GMP) updated to ' . ($newGmp !== null ? "₹{$newGmp}" : 'N/A') . '.');
     }
 
+    public function updateListing(Request $request, Ipo $ipo): RedirectResponse
+    {
+        $user = $request->user();
+        if (! $user || ! $user->isAdmin()) {
+            abort(403, 'Only administrators can update listing details.');
+        }
+
+        $validated = $request->validate([
+            'listing_price' => 'nullable|numeric|min:0',
+            'base_price_per_lot' => 'nullable|numeric|min:0',
+            'listing_profit_per_lot' => 'nullable|numeric|min:0',
+            'status' => 'nullable|in:upcoming,open,closed,allotment_out,listed',
+        ]);
+
+        $listingPrice = isset($validated['listing_price']) && $validated['listing_price'] !== ''
+            ? (float) $validated['listing_price']
+            : null;
+
+        $basePricePerLot = isset($validated['base_price_per_lot']) && $validated['base_price_per_lot'] !== ''
+            ? (float) $validated['base_price_per_lot']
+            : null;
+
+        $profitPerLot = isset($validated['listing_profit_per_lot']) && $validated['listing_profit_per_lot'] !== ''
+            ? (float) $validated['listing_profit_per_lot']
+            : null;
+
+        // If profit per lot is not explicitly given, calculate it from listing price and base price / issue price
+        if ($profitPerLot === null && $listingPrice !== null && $listingPrice > 0) {
+            $lot = max(1, (int) ($ipo->lot_size ?? 1));
+            if ($basePricePerLot !== null && $basePricePerLot > 0) {
+                $profitPerLot = round(($listingPrice * $lot) - $basePricePerLot, 2);
+            } elseif ($ipo->issue_price && (float) $ipo->issue_price > 0) {
+                $profitPerLot = round(($listingPrice - (float) $ipo->issue_price) * $lot, 2);
+            }
+        }
+
+        $status = $validated['status'] ?? ($listingPrice ? 'listed' : $ipo->status);
+
+        $ipo->update([
+            'listing_price' => $listingPrice,
+            'base_price_per_lot' => $basePricePerLot,
+            'listing_profit_per_lot' => $profitPerLot,
+            'status' => $status,
+        ]);
+
+        $updatedBatchesCount = \App\Services\ApplicationBatchService::recalculateListingSettlementsForIpo($ipo);
+
+        AuditService::log(
+            'ipo_listing_updated',
+            $ipo,
+            null,
+            $validated,
+            "Updated listing price for {$ipo->company_name} to ₹{$listingPrice} (Profit/lot: ₹{$profitPerLot}). Recalculated {$updatedBatchesCount} allotted applications."
+        );
+
+        $formattedProfit = $profitPerLot !== null ? '₹' . number_format($profitPerLot, 2) : 'N/A';
+        return back()->with('success', "Listing details updated. {$formattedProfit} profit per lot applied across {$updatedBatchesCount} allotted applications.");
+    }
+
     public function destroy(Ipo $ipo): RedirectResponse
     {
         $ipo->update(['status' => 'closed']);
